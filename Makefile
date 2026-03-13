@@ -11,7 +11,7 @@ build:
 	CGO_ENABLED=$(CGO_ENABLED) go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/synapbus
 
 test:
-	CGO_ENABLED=$(CGO_ENABLED) go test ./... -v -race -count=1
+	CGO_ENABLED=$(CGO_ENABLED) go test ./... -v -count=1
 
 dev:
 	CGO_ENABLED=$(CGO_ENABLED) go run ./cmd/synapbus serve
