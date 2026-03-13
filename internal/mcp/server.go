@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
+	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
 )
 
@@ -24,6 +25,7 @@ type MCPServer struct {
 func NewMCPServer(
 	msgService *messaging.MessagingService,
 	agentService *agents.AgentService,
+	channelService *channels.Service,
 ) *MCPServer {
 	logger := slog.Default().With("component", "mcp-server")
 
@@ -37,6 +39,12 @@ func NewMCPServer(
 	// Register all tools
 	registrar := NewToolRegistrar(msgService, agentService)
 	registrar.RegisterAll(mcpSrv)
+
+	// Register channel tools
+	if channelService != nil {
+		channelRegistrar := NewChannelToolRegistrar(channelService)
+		channelRegistrar.RegisterAll(mcpSrv)
+	}
 
 	// Create SSE transport with context func for auth propagation
 	sseServer := server.NewSSEServer(mcpSrv,

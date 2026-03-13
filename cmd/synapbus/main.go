@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
+	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
 	"github.com/smart-mcp-proxy/synapbus/internal/storage"
@@ -90,8 +91,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	agentStore := agents.NewSQLiteAgentStore(db.DB)
 	agentService := agents.NewAgentService(agentStore, tracer)
 
+	channelStore := channels.NewSQLiteChannelStore(db.DB)
+	channelService := channels.NewService(channelStore, msgService, tracer)
+
 	// Create MCP server
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService)
 	startTime := time.Now()
 
 	// Set up chi router
