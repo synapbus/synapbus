@@ -180,6 +180,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	channelStore := channels.NewSQLiteChannelStore(db.DB)
 	channelService := channels.NewService(channelStore, msgService, tracer)
 
+	// Create swarm service (task auction + stigmergy)
+	taskStore := channels.NewSQLiteTaskStore(db.DB)
+	swarmService := channels.NewSwarmService(taskStore, channelStore, tracer)
+
 	// Initialize auth subsystem
 	authSecret := make([]byte, 32)
 	if _, err := rand.Read(authSecret); err != nil {
@@ -220,9 +224,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("========================================\n\n")
 	}
 
-	// Create MCP server
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService)
+	// Create MCP server (with swarm tools)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService)
 	startTime := time.Now()
+
+	// Start task expiry worker
+	expiryWorker := channels.NewExpiryWorker(swarmService, 1*time.Minute)
+	expiryWorker.Start()
+	slog.Info("task expiry worker started")
 
 	// Set up chi router
 	r := chi.NewRouter()
@@ -283,6 +292,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Stop expiry worker
+	expiryWorker.Stop()
 
 	// Stop retention cleaner
 	if retentionCleaner != nil {

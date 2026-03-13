@@ -26,6 +26,7 @@ func NewMCPServer(
 	msgService *messaging.MessagingService,
 	agentService *agents.AgentService,
 	channelService *channels.Service,
+	swarmService ...*channels.SwarmService,
 ) *MCPServer {
 	logger := slog.Default().With("component", "mcp-server")
 
@@ -44,6 +45,12 @@ func NewMCPServer(
 	if channelService != nil {
 		channelRegistrar := NewChannelToolRegistrar(channelService)
 		channelRegistrar.RegisterAll(mcpSrv)
+	}
+
+	// Register swarm tools
+	if len(swarmService) > 0 && swarmService[0] != nil && channelService != nil {
+		swarmRegistrar := NewSwarmToolRegistrar(swarmService[0], channelService)
+		swarmRegistrar.RegisterAll(mcpSrv)
 	}
 
 	// Create SSE transport with context func for auth propagation
