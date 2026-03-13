@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
 	"github.com/smart-mcp-proxy/synapbus/internal/admin"
@@ -25,8 +26,10 @@ import (
 	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
 	"github.com/smart-mcp-proxy/synapbus/internal/auth"
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
+	"github.com/smart-mcp-proxy/synapbus/internal/health"
 	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
+	prommetrics "github.com/smart-mcp-proxy/synapbus/internal/metrics"
 	"github.com/smart-mcp-proxy/synapbus/internal/search"
 	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
 	"github.com/smart-mcp-proxy/synapbus/internal/storage"
@@ -338,11 +341,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 	expiryWorker.Start()
 	slog.Info("task expiry worker started")
 
+	// Create health checker
+	healthChecker := health.NewChecker(db.DB, "0.1.0")
+
 	// Set up chi router
 	r := chi.NewRouter()
 
+	// Add metrics middleware when enabled
+	if metricsEnabled {
+		r.Use(prommetrics.Middleware)
+		slog.Info("prometheus HTTP metrics middleware enabled")
+	}
+
 	// Health endpoint (no auth)
 	r.Get("/health", mcpserver.NewHealthHandler(mcpSrv.ConnectionManager(), "0.1.0", startTime))
+
+	// Kubernetes-style health probes (no auth, always registered)
+	r.Get("/healthz", healthChecker.Healthz)
+	r.Get("/readyz", healthChecker.Readyz)
+
+	// Prometheus metrics endpoint (only when enabled)
+	if metricsEnabled {
+		r.Handle("/metrics", promhttp.Handler())
+	}
 
 	// Auth endpoints (public)
 	r.Post("/auth/register", authHandlers.HandleRegister)
