@@ -125,6 +125,18 @@ func (s *AgentService) GetAgent(ctx context.Context, name string) (*Agent, error
 	return agent, nil
 }
 
+// GetAgentByID returns an agent by ID.
+func (s *AgentService) GetAgentByID(ctx context.Context, id int64) (*Agent, error) {
+	agent, err := s.store.GetAgentByID(ctx, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("agent not found: %d", id)
+		}
+		return nil, err
+	}
+	return agent, nil
+}
+
 // UpdateAgent updates an agent's display name and/or capabilities.
 func (s *AgentService) UpdateAgent(ctx context.Context, name string, displayName string, capabilities json.RawMessage) (*Agent, error) {
 	agent, err := s.store.GetAgentByName(ctx, name)

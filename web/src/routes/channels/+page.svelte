@@ -5,7 +5,6 @@
 	let loadingData = $state(true);
 	let showCreate = $state(false);
 
-	// Create form
 	let newName = $state('');
 	let newDescription = $state('');
 	let newIsPrivate = $state(false);
@@ -59,24 +58,31 @@
 	}
 </script>
 
-<div class="max-w-4xl mx-auto">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Channels</h1>
-		<button class="btn-primary" onclick={() => (showCreate = !showCreate)}>
-			{showCreate ? 'Cancel' : 'Create Channel'}
+<div class="p-5 max-w-5xl">
+	<div class="flex items-center justify-between mb-5">
+		<h1 class="text-xl font-bold text-text-primary font-display">Channels</h1>
+		<button class="btn-primary flex items-center gap-1.5" onclick={() => (showCreate = !showCreate)}>
+			{#if showCreate}
+				Cancel
+			{:else}
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+				</svg>
+				Create Channel
+			{/if}
 		</button>
 	</div>
 
 	{#if showCreate}
-		<form class="card p-4 mb-6" onsubmit={handleCreate}>
+		<form class="card p-5 mb-5" onsubmit={handleCreate}>
 			{#if createError}
-				<div class="mb-3 p-2 bg-red-50 dark:bg-red-900/30 rounded text-sm text-red-700 dark:text-red-300">{createError}</div>
+				<div class="mb-3 px-3 py-2 bg-accent-red/10 rounded text-xs text-accent-red">{createError}</div>
 			{/if}
 			<div class="space-y-3">
 				<input type="text" class="input" placeholder="Channel name (e.g. research-findings)" bind:value={newName} />
 				<input type="text" class="input" placeholder="Description (optional)" bind:value={newDescription} />
-				<label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-					<input type="checkbox" bind:checked={newIsPrivate} class="rounded" />
+				<label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+					<input type="checkbox" bind:checked={newIsPrivate} class="rounded bg-bg-input border-border text-accent-green focus:ring-accent-green" />
 					Private channel (invite-only)
 				</label>
 				<button type="submit" class="btn-primary" disabled={creating}>
@@ -88,34 +94,34 @@
 
 	<div class="card">
 		{#if loadingData}
-			<div class="p-4 space-y-3">
+			<div class="p-5 space-y-3">
 				{#each Array(3) as _}
 					<div class="skeleton h-12 w-full"></div>
 				{/each}
 			</div>
 		{:else if channelList.length === 0}
-			<div class="p-8 text-center text-gray-500 dark:text-gray-400">
-				<p>No channels yet. Create one to get started.</p>
+			<div class="p-8 text-center text-text-secondary text-sm">
+				No channels yet. Create one to get started.
 			</div>
 		{:else}
-			<div class="divide-y divide-gray-100 dark:divide-gray-700">
+			<div class="divide-y divide-border">
 				{#each channelList as ch}
-					<a href="/channels/{ch.name}" class="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+					<a href="/channels/{ch.name}" class="block px-5 py-3 hover:bg-bg-tertiary/50 transition-colors">
 						<div class="flex items-center justify-between">
 							<div class="min-w-0">
 								<div class="flex items-center gap-2">
-									<span class="font-medium text-sm text-gray-900 dark:text-gray-100">#{ch.name}</span>
+									<span class="font-medium text-sm text-text-primary font-mono">#{ch.name}</span>
 									{#if ch.is_private}
-										<svg class="w-3.5 h-3.5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+										<svg class="w-3.5 h-3.5 text-text-secondary" fill="currentColor" viewBox="0 0 20 20">
 											<path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
 										</svg>
 									{/if}
 								</div>
 								{#if ch.description}
-									<p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{ch.description}</p>
+									<p class="text-xs text-text-secondary truncate mt-0.5">{ch.description}</p>
 								{/if}
 							</div>
-							<span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 flex-shrink-0 ml-3">
+							<span class="badge bg-bg-tertiary text-text-secondary flex-shrink-0 ml-3">
 								{ch.member_count} members
 							</span>
 						</div>

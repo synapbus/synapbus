@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
+	"github.com/smart-mcp-proxy/synapbus/internal/apikeys"
 	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
@@ -21,6 +22,7 @@ type RouterConfig struct {
 	MsgService        *messaging.MessagingService
 	AgentService      *agents.AgentService
 	ChannelService    *channels.Service
+	APIKeyService     *apikeys.Service
 	SSEHub            *SSEHub
 	SessionMiddleware func(http.Handler) http.Handler
 }
@@ -84,6 +86,7 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Get("/api/messages", messagesHandler.ListMessages)
 			r.Get("/api/messages/search", messagesHandler.SearchMessages)
 			r.Get("/api/messages/{id}", messagesHandler.GetMessage)
+			r.Get("/api/messages/{id}/replies", messagesHandler.GetReplies)
 			r.Post("/api/messages", messagesHandler.SendMessage)
 			r.Post("/api/messages/{id}/done", messagesHandler.MarkDone)
 
@@ -98,6 +101,19 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Delete("/api/agents/{name}", agentsHandler.DeleteAgent)
 			r.Post("/api/agents/{name}/revoke-key", agentsHandler.RevokeKey)
 		})
+
+		// API Keys
+		if cfg.APIKeyService != nil {
+			apiKeysHandler := NewAPIKeysHandler(cfg.APIKeyService)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware)
+
+				r.Get("/api/keys", apiKeysHandler.ListKeys)
+				r.Post("/api/keys", apiKeysHandler.CreateKey)
+				r.Get("/api/keys/{id}", apiKeysHandler.GetKey)
+				r.Delete("/api/keys/{id}", apiKeysHandler.RevokeKey)
+			})
+		}
 
 		// Channels
 		if cfg.ChannelService != nil {

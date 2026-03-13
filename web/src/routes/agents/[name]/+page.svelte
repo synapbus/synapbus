@@ -63,81 +63,94 @@
 	}
 </script>
 
-<div class="max-w-4xl mx-auto">
-	<a href="/agents" class="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 mb-4 inline-block">
-		&larr; Back to agents
+<div class="p-5 max-w-5xl">
+	<a href="/agents" class="inline-flex items-center gap-1 text-xs text-text-link hover:underline mb-4">
+		<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+			<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+		</svg>
+		Back to agents
 	</a>
 
 	{#if loadingData}
 		<div class="card p-6">
-			<div class="skeleton h-8 w-1/3 mb-4"></div>
-			<div class="skeleton h-4 w-1/2 mb-2"></div>
-			<div class="skeleton h-4 w-1/4"></div>
+			<div class="flex gap-3">
+				<div class="skeleton w-12 h-12 rounded-lg"></div>
+				<div class="flex-1 space-y-2">
+					<div class="skeleton h-5 w-1/3"></div>
+					<div class="skeleton h-3 w-1/4"></div>
+				</div>
+			</div>
 		</div>
 	{:else if agent}
 		<!-- Agent Details -->
-		<div class="card mb-6">
-			<div class="p-4 border-b border-gray-200 dark:border-gray-700">
+		<div class="card mb-5">
+			<div class="p-5 border-b border-border">
 				<div class="flex items-start justify-between">
-					<div>
-						<h1 class="text-xl font-bold text-gray-900 dark:text-white">{agent.display_name || agent.name}</h1>
-						{#if agent.display_name}
-							<p class="text-sm text-gray-500 dark:text-gray-400">@{agent.name}</p>
-						{/if}
+					<div class="flex items-center gap-3">
+						<div class="w-12 h-12 rounded-lg bg-bg-tertiary flex items-center justify-center text-lg font-bold text-text-secondary">
+							{(agent.display_name || agent.name).charAt(0).toUpperCase()}
+						</div>
+						<div>
+							<h1 class="text-lg font-bold text-text-primary font-display">{agent.display_name || agent.name}</h1>
+							{#if agent.display_name}
+								<p class="text-xs text-text-secondary font-mono">@{agent.name}</p>
+							{/if}
+						</div>
 					</div>
 					<div class="flex items-center gap-2">
-						<span class="badge {agent.type === 'ai' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'}">
+						<span class="badge {agent.type === 'ai' ? 'bg-accent-purple/20 text-accent-purple' : 'bg-accent-blue/20 text-accent-blue'}">
 							{agent.type}
 						</span>
-						<span class="badge {agent.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-600'}">
+						<span class="flex items-center gap-1.5 badge {agent.status === 'active' ? 'bg-accent-green/20 text-accent-green' : 'bg-bg-tertiary text-text-secondary'}">
+							<span class="w-1.5 h-1.5 rounded-full {agent.status === 'active' ? 'bg-accent-green' : 'bg-text-secondary'}"></span>
 							{agent.status}
 						</span>
 					</div>
 				</div>
 			</div>
 
-			<div class="p-4 space-y-3">
+			<div class="p-5 space-y-3">
 				<div class="grid grid-cols-2 gap-4 text-sm">
 					<div>
-						<p class="text-gray-500 dark:text-gray-400">Created</p>
-						<p class="text-gray-900 dark:text-gray-100">{new Date(agent.created_at).toLocaleString()}</p>
+						<p class="text-xs text-text-secondary mb-0.5">Created</p>
+						<p class="text-text-primary">{new Date(agent.created_at).toLocaleString()}</p>
 					</div>
 					<div>
-						<p class="text-gray-500 dark:text-gray-400">Last Updated</p>
-						<p class="text-gray-900 dark:text-gray-100">{new Date(agent.updated_at).toLocaleString()}</p>
+						<p class="text-xs text-text-secondary mb-0.5">Last Updated</p>
+						<p class="text-text-primary">{new Date(agent.updated_at).toLocaleString()}</p>
 					</div>
 				</div>
 
 				{#if agent.capabilities && JSON.stringify(agent.capabilities) !== '{}'}
 					<div>
-						<p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Capabilities</p>
-						<pre class="text-xs bg-gray-50 dark:bg-gray-900 p-2 rounded overflow-x-auto">{JSON.stringify(agent.capabilities, null, 2)}</pre>
+						<p class="text-xs text-text-secondary mb-1">Capabilities</p>
+						<pre class="text-xs bg-bg-primary p-3 rounded-lg border border-border overflow-x-auto font-mono text-text-primary/80">{JSON.stringify(agent.capabilities, null, 2)}</pre>
 					</div>
 				{/if}
 			</div>
 
 			<!-- Actions -->
-			<div class="p-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+			<div class="p-5 border-t border-border space-y-3">
 				{#if revokeKey}
-					<div class="p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg">
-						<p class="text-sm font-medium text-green-800 dark:text-green-200 mb-1">New API key generated. Save it now - it will not be shown again:</p>
-						<code class="block p-2 bg-white dark:bg-gray-800 rounded text-xs font-mono break-all select-all">{revokeKey}</code>
+					<div class="p-4 bg-accent-green/10 border border-accent-green/20 rounded-lg">
+						<p class="text-xs font-semibold text-accent-green mb-2">New API key generated. Save it now - it will not be shown again:</p>
+						<code class="block p-3 bg-bg-primary rounded text-xs font-mono text-text-primary break-all select-all border border-border">{revokeKey}</code>
 					</div>
 				{/if}
 
 				<div class="flex gap-2">
-					<button class="btn-secondary text-sm" onclick={handleRevokeKey} disabled={revoking}>
+					<button class="btn-secondary text-xs" onclick={handleRevokeKey} disabled={revoking}>
 						{revoking ? 'Regenerating...' : 'Regenerate API Key'}
 					</button>
 					{#if !confirmDelete}
-						<button class="btn-danger text-sm" onclick={() => (confirmDelete = true)}>
+						<button class="btn-danger text-xs" onclick={() => (confirmDelete = true)}>
 							Delete Agent
 						</button>
 					{:else}
-						<button class="btn-danger text-sm" onclick={handleDelete} disabled={deleting}>
+						<button class="btn-danger text-xs" onclick={handleDelete} disabled={deleting}>
 							{deleting ? 'Deleting...' : 'Confirm Delete'}
 						</button>
-						<button class="btn-secondary text-sm" onclick={() => (confirmDelete = false)}>Cancel</button>
+						<button class="btn-secondary text-xs" onclick={() => (confirmDelete = false)}>Cancel</button>
 					{/if}
 				</div>
 			</div>
@@ -145,14 +158,14 @@
 
 		<!-- Activity Traces -->
 		<div class="card">
-			<div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-				<h2 class="font-semibold text-gray-900 dark:text-gray-100">Activity Traces</h2>
+			<div class="px-5 py-3 border-b border-border">
+				<h2 class="font-semibold text-sm text-text-primary font-display">Activity Traces</h2>
 			</div>
 			<TraceViewer {traces} />
 		</div>
 	{:else}
-		<div class="card p-8 text-center">
-			<p class="text-gray-500 dark:text-gray-400">Agent not found</p>
+		<div class="card p-8 text-center text-text-secondary text-sm">
+			Agent not found
 		</div>
 	{/if}
 </div>

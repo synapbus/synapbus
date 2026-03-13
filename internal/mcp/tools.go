@@ -62,6 +62,7 @@ func (tr *ToolRegistrar) sendMessageTool() mcp.Tool {
 		mcp.WithNumber("priority", mcp.Description("Message priority (1-10, default 5)"), mcp.Min(1), mcp.Max(10)),
 		mcp.WithString("metadata", mcp.Description("JSON metadata object (optional)")),
 		mcp.WithNumber("channel_id", mcp.Description("Channel ID for channel messages (optional)")),
+		mcp.WithNumber("reply_to", mcp.Description("ID of the message to reply to (optional, for threading)")),
 	)
 }
 
@@ -163,11 +164,18 @@ func (tr *ToolRegistrar) handleSendMessage(ctx context.Context, req mcp.CallTool
 		channelID = &v
 	}
 
+	var replyTo *int64
+	if rtID := req.GetInt("reply_to", 0); rtID > 0 {
+		v := int64(rtID)
+		replyTo = &v
+	}
+
 	opts := messaging.SendOptions{
 		Subject:   subject,
 		Priority:  priority,
 		Metadata:  metadataStr,
 		ChannelID: channelID,
+		ReplyTo:   replyTo,
 	}
 
 	msg, err := tr.msgService.SendMessage(ctx, agentName, to, body, opts)

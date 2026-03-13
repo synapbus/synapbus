@@ -243,6 +243,7 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		Priority  int    `json:"priority"`
 		ChannelID *int64 `json:"channel_id,omitempty"`
 		Subject   string `json:"subject,omitempty"`
+		ReplyTo   *int64 `json:"reply_to,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -273,6 +274,7 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		Priority:  req.Priority,
 		ChannelID: req.ChannelID,
 		Subject:   req.Subject,
+		ReplyTo:   req.ReplyTo,
 	}
 
 	msg, err := h.msgService.SendMessage(r.Context(), req.From, req.To, req.Body, opts)
@@ -381,6 +383,45 @@ func (h *MessagesHandler) SearchMessages(w http.ResponseWriter, r *http.Request)
 		"messages": allMessages,
 		"query":    query,
 		"total":    len(allMessages),
+	})
+}
+
+// GetReplies handles GET /api/messages/{id}/replies.
+func (h *MessagesHandler) GetReplies(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := OwnerIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody("unauthorized", "Authentication required"))
+		return
+	}
+
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody("invalid_id", "Invalid message ID"))
+		return
+	}
+
+	// Verify the parent message exists and user has access
+	msg, err := h.msgService.GetMessageByID(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, errorBody("not_found", "Message not found"))
+		return
+	}
+
+	if !h.isAgentOwnedBy(r, msg.FromAgent, ownerID) && !h.isAgentOwnedBy(r, msg.ToAgent, ownerID) {
+		writeJSON(w, http.StatusForbidden, errorBody("forbidden", "You do not have access to this message"))
+		return
+	}
+
+	replies, err := h.msgService.GetReplies(r.Context(), id)
+	if err != nil {
+		h.logger.Error("get replies failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to get replies"))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"replies": replies,
+		"total":   len(replies),
 	})
 }
 

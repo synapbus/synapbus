@@ -21,6 +21,7 @@ type Message struct {
 	FromAgent      string           `json:"from_agent"`
 	ToAgent        string           `json:"to_agent,omitempty"`
 	ChannelID      *int64           `json:"channel_id,omitempty"`
+	ReplyTo        *int64           `json:"reply_to,omitempty"`
 	Body           string           `json:"body"`
 	Priority       int              `json:"priority"`
 	Status         string           `json:"status"`

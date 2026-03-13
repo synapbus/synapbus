@@ -22,6 +22,7 @@ type MessageStore interface {
 	SearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) ([]*Message, error)
 	GetConversation(ctx context.Context, id int64) (*Conversation, error)
 	GetConversationMessages(ctx context.Context, conversationID int64) ([]*Message, error)
+	GetReplies(ctx context.Context, messageID int64) ([]*Message, error)
 	AgentExists(ctx context.Context, agentName string) (bool, error)
 }
 
@@ -86,10 +87,15 @@ func (s *SQLiteMessageStore) InsertMessage(ctx context.Context, msg *Message) er
 		toAgent = sql.NullString{String: msg.ToAgent, Valid: true}
 	}
 
+	var replyTo sql.NullInt64
+	if msg.ReplyTo != nil {
+		replyTo = sql.NullInt64{Int64: *msg.ReplyTo, Valid: true}
+	}
+
 	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO messages (conversation_id, from_agent, to_agent, channel_id, body, priority, status, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		msg.ConversationID, msg.FromAgent, toAgent, msg.ChannelID, msg.Body, msg.Priority, msg.Status, string(metadata),
+		`INSERT INTO messages (conversation_id, from_agent, to_agent, channel_id, reply_to, body, priority, status, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		msg.ConversationID, msg.FromAgent, toAgent, msg.ChannelID, replyTo, msg.Body, msg.Priority, msg.Status, string(metadata),
 	)
 	if err != nil {
 		return fmt.Errorf("insert message: %w", err)
@@ -147,7 +153,7 @@ func (s *SQLiteMessageStore) GetInboxMessages(ctx context.Context, agentName str
 	query := fmt.Sprintf(
 		`SELECT m.id, m.conversation_id, m.from_agent, m.to_agent, m.channel_id,
 		        m.body, m.priority, m.status, m.metadata, m.claimed_by, m.claimed_at,
-		        m.created_at, m.updated_at
+		        m.created_at, m.updated_at, m.reply_to
 		 FROM messages m
 		 WHERE %s
 		 ORDER BY m.priority DESC, m.created_at ASC
@@ -263,7 +269,7 @@ func (s *SQLiteMessageStore) ClaimMessages(ctx context.Context, agentName string
 		fmt.Sprintf(
 			`SELECT id, conversation_id, from_agent, to_agent, channel_id,
 			        body, priority, status, metadata, claimed_by, claimed_at,
-			        created_at, updated_at
+			        created_at, updated_at, reply_to
 			 FROM messages
 			 WHERE id IN (%s)
 			 ORDER BY priority DESC, created_at ASC`,
@@ -314,7 +320,7 @@ func (s *SQLiteMessageStore) GetMessageByID(ctx context.Context, id int64) (*Mes
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, conversation_id, from_agent, to_agent, channel_id,
 		        body, priority, status, metadata, claimed_by, claimed_at,
-		        created_at, updated_at
+		        created_at, updated_at, reply_to
 		 FROM messages WHERE id = ?`, id,
 	)
 	return scanMessage(row)
@@ -368,7 +374,7 @@ func (s *SQLiteMessageStore) SearchMessages(ctx context.Context, agentName, quer
 	querySQL := fmt.Sprintf(
 		`SELECT m.id, m.conversation_id, m.from_agent, m.to_agent, m.channel_id,
 		        m.body, m.priority, m.status, m.metadata, m.claimed_by, m.claimed_at,
-		        m.created_at, m.updated_at
+		        m.created_at, m.updated_at, m.reply_to
 		 FROM messages m
 		 %s
 		 WHERE %s
@@ -409,12 +415,28 @@ func (s *SQLiteMessageStore) GetConversationMessages(ctx context.Context, conver
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, conversation_id, from_agent, to_agent, channel_id,
 		        body, priority, status, metadata, claimed_by, claimed_at,
-		        created_at, updated_at
+		        created_at, updated_at, reply_to
 		 FROM messages WHERE conversation_id = ?
 		 ORDER BY created_at ASC`, conversationID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation messages: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
+func (s *SQLiteMessageStore) GetReplies(ctx context.Context, messageID int64) ([]*Message, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, conversation_id, from_agent, to_agent, channel_id,
+		        body, priority, status, metadata, claimed_by, claimed_at,
+		        created_at, updated_at, reply_to
+		 FROM messages WHERE reply_to = ?
+		 ORDER BY created_at ASC`, messageID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get replies: %w", err)
 	}
 	defer rows.Close()
 
@@ -453,14 +475,14 @@ func scanMessages(rows *sql.Rows) ([]*Message, error) {
 func scanMessageFromRows(rows *sql.Rows) (*Message, error) {
 	var msg Message
 	var toAgent, claimedBy sql.NullString
-	var channelID sql.NullInt64
+	var channelID, replyTo sql.NullInt64
 	var claimedAt sql.NullTime
 	var metadata string
 
 	err := rows.Scan(
 		&msg.ID, &msg.ConversationID, &msg.FromAgent, &toAgent, &channelID,
 		&msg.Body, &msg.Priority, &msg.Status, &metadata, &claimedBy, &claimedAt,
-		&msg.CreatedAt, &msg.UpdatedAt,
+		&msg.CreatedAt, &msg.UpdatedAt, &replyTo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan message: %w", err)
@@ -471,6 +493,9 @@ func scanMessageFromRows(rows *sql.Rows) (*Message, error) {
 	}
 	if channelID.Valid {
 		msg.ChannelID = &channelID.Int64
+	}
+	if replyTo.Valid {
+		msg.ReplyTo = &replyTo.Int64
 	}
 	if claimedBy.Valid {
 		msg.ClaimedBy = claimedBy.String
@@ -487,14 +512,14 @@ func scanMessageFromRows(rows *sql.Rows) (*Message, error) {
 func scanMessage(row *sql.Row) (*Message, error) {
 	var msg Message
 	var toAgent, claimedBy sql.NullString
-	var channelID sql.NullInt64
+	var channelID, replyTo sql.NullInt64
 	var claimedAt sql.NullTime
 	var metadata string
 
 	err := row.Scan(
 		&msg.ID, &msg.ConversationID, &msg.FromAgent, &toAgent, &channelID,
 		&msg.Body, &msg.Priority, &msg.Status, &metadata, &claimedBy, &claimedAt,
-		&msg.CreatedAt, &msg.UpdatedAt,
+		&msg.CreatedAt, &msg.UpdatedAt, &replyTo,
 	)
 	if err != nil {
 		return nil, err
@@ -505,6 +530,9 @@ func scanMessage(row *sql.Row) (*Message, error) {
 	}
 	if channelID.Valid {
 		msg.ChannelID = &channelID.Int64
+	}
+	if replyTo.Valid {
+		msg.ReplyTo = &replyTo.Int64
 	}
 	if claimedBy.Valid {
 		msg.ClaimedBy = claimedBy.String

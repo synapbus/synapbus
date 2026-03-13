@@ -101,4 +101,13 @@ export const channels = {
 		request<{ status: string }>('POST', `/api/channels/${encodeURIComponent(name)}/leave`, agent ? { agent } : {})
 };
 
+// API Keys
+export const apiKeys = {
+	list: () => request<{ keys: any[] }>('GET', '/api/keys'),
+	create: (body: { name: string; agent_id?: number; permissions?: object; allowed_channels?: string[]; read_only?: boolean; expires_at?: string }) =>
+		request<{ key: any; api_key: string; mcp_config: any }>('POST', '/api/keys', body),
+	revoke: (id: number) => request<{ status: string }>('DELETE', `/api/keys/${id}`),
+	get: (id: number) => request<any>('GET', `/api/keys/${id}`)
+};
+
 export { ApiError };

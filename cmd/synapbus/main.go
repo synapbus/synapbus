@@ -18,8 +18,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/cobra"
 
+	"github.com/smart-mcp-proxy/synapbus/internal/admin"
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
 	"github.com/smart-mcp-proxy/synapbus/internal/api"
+	"github.com/smart-mcp-proxy/synapbus/internal/apikeys"
 	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
 	"github.com/smart-mcp-proxy/synapbus/internal/auth"
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
@@ -33,11 +35,13 @@ import (
 )
 
 var (
+	host           string
 	port           int
 	dataDir        string
 	logLevel       string
 	metricsEnabled bool
 	traceRetention string
+	adminSocketPath string
 )
 
 func main() {
@@ -53,13 +57,18 @@ func main() {
 		RunE:  runServe,
 	}
 
+	serveCmd.Flags().StringVar(&host, "host", "0.0.0.0", "HTTP server bind address")
 	serveCmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	serveCmd.Flags().StringVar(&dataDir, "data", "./data", "Data directory for storage")
 	serveCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	serveCmd.Flags().BoolVar(&metricsEnabled, "metrics", false, "Enable Prometheus metrics endpoint at /metrics")
 	serveCmd.Flags().StringVar(&traceRetention, "trace-retention", "0", "Trace retention period (e.g. 30d, 90d, 0 for unlimited)")
+	serveCmd.Flags().StringVar(&adminSocketPath, "admin-socket", "", "Admin Unix socket path (default: {data}/synapbus.sock)")
 
 	rootCmd.AddCommand(serveCmd)
+
+	// Add admin CLI subcommands.
+	addAdminCommands(rootCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		slog.Error("command failed", "error", err)
@@ -103,6 +112,9 @@ func parseRetentionDuration(s string) time.Duration {
 
 func runServe(cmd *cobra.Command, args []string) error {
 	// Check for environment variable overrides
+	if h := os.Getenv("SYNAPBUS_HOST"); h != "" {
+		host = h
+	}
 	if p := os.Getenv("SYNAPBUS_PORT"); p != "" {
 		fmt.Sscanf(p, "%d", &port)
 	}
@@ -118,6 +130,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if tr := os.Getenv("SYNAPBUS_TRACE_RETENTION"); tr != "" {
 		traceRetention = tr
 	}
+	if as := os.Getenv("SYNAPBUS_ADMIN_SOCKET"); as != "" {
+		adminSocketPath = as
+	}
+	if adminSocketPath == "" {
+		adminSocketPath = filepath.Join(dataDir, "synapbus.sock")
+	}
 
 	// Configure slog with JSON handler
 	level := parseLogLevel(logLevel)
@@ -129,11 +147,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	slog.Info("starting SynapBus",
+		"host", host,
 		"port", port,
 		"data_dir", dataDir,
 		"log_level", logLevel,
 		"metrics_enabled", metricsEnabled,
 		"trace_retention", traceRetention,
+		"admin_socket", adminSocketPath,
 	)
 
 	// Initialize SQLite database
@@ -305,6 +325,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		slog.Info("semantic search not configured, using full-text search only")
 	}
 
+	// Create API key service
+	apiKeyStore := apikeys.NewSQLiteStore(db.DB)
+	apiKeyService := apikeys.NewService(apiKeyStore)
+
 	// Create MCP server (with swarm + attachment + search tools)
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService)
 	startTime := time.Now()
@@ -337,9 +361,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		r.Put("/auth/password", authHandlers.HandleChangePassword)
 	})
 
-	// MCP Streamable HTTP endpoint (with optional agent auth)
+	// MCP Streamable HTTP endpoint (with optional agent auth + API keys)
 	r.Group(func(r chi.Router) {
-		r.Use(agents.OptionalAuthMiddleware(agentService))
+		r.Use(agents.OptionalAuthMiddlewareWithAPIKeys(agentService, apiKeyService))
 		r.Mount("/mcp", mcpSrv.Handler())
 	})
 
@@ -355,6 +379,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		MsgService:        msgService,
 		AgentService:      agentService,
 		ChannelService:    channelService,
+		APIKeyService:     apiKeyService,
 		SSEHub:            sseHub,
 		SessionMiddleware: sessionMiddleware,
 	})
@@ -363,8 +388,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Serve embedded Web UI SPA (catch-all for non-API routes)
 	r.NotFound(web.NewSPAHandler().ServeHTTP)
 
+	// Start admin socket server
+	adminSvcs := &admin.Services{
+		Users:    userStore,
+		Sessions: sessionStore,
+		Agents:   agentService,
+		Messages: msgService,
+		Channels: channelService,
+		Traces:   traceStore,
+		DataDir:  dataDir,
+	}
+	adminServer := admin.NewServer(adminSocketPath, db.DB, adminSvcs, logger)
+	if err := adminServer.Start(); err != nil {
+		return fmt.Errorf("start admin socket: %w", err)
+	}
+	slog.Info("admin socket listening", "path", adminServer.SocketPath())
+
 	// Start HTTP server
-	addr := fmt.Sprintf(":%d", port)
+	addr := fmt.Sprintf("%s:%d", host, port)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: r,
@@ -392,6 +433,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Stop admin socket
+	adminServer.Stop()
 
 	// Stop expiry worker
 	expiryWorker.Stop()

@@ -58,9 +58,12 @@
 	}
 </script>
 
-<div class="max-w-4xl mx-auto">
-	<a href="/channels" class="text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400 mb-4 inline-block">
-		&larr; Back to channels
+<div class="p-5 max-w-5xl">
+	<a href="/channels" class="inline-flex items-center gap-1 text-xs text-text-link hover:underline mb-4">
+		<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+			<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+		</svg>
+		Back to channels
 	</a>
 
 	{#if loadingData}
@@ -70,52 +73,57 @@
 			<div class="skeleton h-20 w-full"></div>
 		</div>
 	{:else if channel}
-		<div class="card mb-6">
-			<div class="px-4 py-4 border-b border-gray-200 dark:border-gray-700">
+		<div class="card mb-5">
+			<div class="px-5 py-4 border-b border-border">
 				<div class="flex items-center justify-between">
 					<div>
 						<div class="flex items-center gap-2">
-							<h1 class="text-xl font-bold text-gray-900 dark:text-white">#{channel.name}</h1>
+							<h1 class="text-lg font-bold text-text-primary font-display font-mono">#{channel.name}</h1>
 							{#if channel.is_private}
-								<span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">Private</span>
+								<span class="badge bg-bg-tertiary text-text-secondary">Private</span>
 							{/if}
-							<span class="badge bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">{channel.type}</span>
+							<span class="badge bg-accent-blue/20 text-accent-blue">{channel.type}</span>
 						</div>
 						{#if channel.description}
-							<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{channel.description}</p>
+							<p class="text-sm text-text-secondary mt-1">{channel.description}</p>
 						{/if}
 						{#if channel.topic}
-							<p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Topic: {channel.topic}</p>
+							<p class="text-xs text-text-secondary mt-1">Topic: {channel.topic}</p>
 						{/if}
 					</div>
 					<div class="flex gap-2">
-						<button class="btn-primary text-sm" onclick={handleJoin} disabled={joining}>
+						<button class="btn-primary text-xs" onclick={handleJoin} disabled={joining}>
 							{joining ? '...' : 'Join'}
 						</button>
-						<button class="btn-secondary text-sm" onclick={handleLeave} disabled={joining}>
+						<button class="btn-secondary text-xs" onclick={handleLeave} disabled={joining}>
 							Leave
 						</button>
 					</div>
 				</div>
 				{#if joinError}
-					<div class="mt-2 text-sm text-red-600 dark:text-red-400">{joinError}</div>
+					<div class="mt-2 text-xs text-accent-red">{joinError}</div>
 				{/if}
 			</div>
 		</div>
 
 		<!-- Members -->
 		<div class="card">
-			<div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-				<h2 class="font-semibold text-gray-900 dark:text-gray-100">Members ({members.length})</h2>
+			<div class="px-5 py-3 border-b border-border">
+				<h2 class="font-semibold text-sm text-text-primary font-display">Members ({members.length})</h2>
 			</div>
 			{#if members.length === 0}
-				<div class="p-6 text-center text-gray-500 dark:text-gray-400">No members</div>
+				<div class="p-6 text-center text-text-secondary text-sm">No members</div>
 			{:else}
-				<div class="divide-y divide-gray-100 dark:divide-gray-700">
+				<div class="divide-y divide-border">
 					{#each members as member}
-						<div class="px-4 py-2 flex items-center justify-between">
-							<span class="text-sm text-gray-900 dark:text-gray-100">{member.agent_name}</span>
-							<span class="badge {member.role === 'owner' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}">
+						<div class="px-5 py-2.5 flex items-center justify-between">
+							<div class="flex items-center gap-2">
+								<span class="w-6 h-6 rounded-full bg-bg-tertiary flex items-center justify-center text-[10px] font-bold text-text-secondary">
+									{member.agent_name.charAt(0).toUpperCase()}
+								</span>
+								<span class="text-sm text-text-primary">{member.agent_name}</span>
+							</div>
+							<span class="badge {member.role === 'owner' ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-bg-tertiary text-text-secondary'}">
 								{member.role}
 							</span>
 						</div>
@@ -124,8 +132,8 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="card p-8 text-center">
-			<p class="text-gray-500 dark:text-gray-400">Channel not found</p>
+		<div class="card p-8 text-center text-text-secondary text-sm">
+			Channel not found
 		</div>
 	{/if}
 </div>

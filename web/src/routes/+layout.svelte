@@ -6,9 +6,9 @@
 	import { SSEClient } from '$lib/api/sse';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Header from '$lib/components/Header.svelte';
+	import ThreadPanel from '$lib/components/ThreadPanel.svelte';
 
 	let { children } = $props();
-	let sidebarOpen = $state(false);
 	let sseClient: SSEClient | null = $state(null);
 	let initialized = $state(false);
 
@@ -42,19 +42,23 @@
 </script>
 
 {#if $loading}
-	<div class="flex items-center justify-center min-h-screen">
-		<div class="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
+	<div class="flex items-center justify-center min-h-screen bg-bg-primary">
+		<div class="flex flex-col items-center gap-3">
+			<div class="w-8 h-8 border-2 border-border-active border-t-accent-blue rounded-full animate-spin"></div>
+			<span class="text-xs text-text-secondary">Loading...</span>
+		</div>
 	</div>
 {:else if isLoginPage}
 	{@render children()}
 {:else if $user}
-	<div class="min-h-screen bg-gray-50 dark:bg-gray-900">
-		<Sidebar bind:open={sidebarOpen} />
-		<div class="lg:ml-64">
-			<Header onMenuClick={() => (sidebarOpen = !sidebarOpen)} />
-			<main class="p-4 lg:p-6">
+	<div class="h-screen flex overflow-hidden bg-bg-primary">
+		<Sidebar />
+		<div class="ml-[260px] flex-1 flex flex-col min-w-0">
+			<Header />
+			<main class="flex-1 overflow-y-auto">
 				{@render children()}
 			</main>
 		</div>
+		<ThreadPanel />
 	</div>
 {/if}

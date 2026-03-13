@@ -103,6 +103,7 @@ func (s *MessagingService) SendMessage(ctx context.Context, from, to, body strin
 		FromAgent:      from,
 		ToAgent:        to,
 		ChannelID:      opts.ChannelID,
+		ReplyTo:        opts.ReplyTo,
 		Body:           body,
 		Priority:       priority,
 		Status:         StatusPending,
@@ -324,6 +325,15 @@ func (s *MessagingService) GetMessageByID(ctx context.Context, id int64) (*Messa
 		return nil, fmt.Errorf("get message: %w", err)
 	}
 	return msg, nil
+}
+
+// GetReplies returns all messages that are replies to the given message.
+func (s *MessagingService) GetReplies(ctx context.Context, messageID int64) ([]*Message, error) {
+	replies, err := s.store.GetReplies(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("get replies: %w", err)
+	}
+	return replies, nil
 }
 
 // GetConversation returns a conversation and its messages.

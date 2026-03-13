@@ -18,6 +18,21 @@ type TraceEntry struct {
 	Error     string
 }
 
+type ctxKey string
+
+const ownerIDKey ctxKey = "trace_owner_id"
+
+// ContextWithOwnerID returns a new context with the trace owner ID set.
+func ContextWithOwnerID(ctx context.Context, ownerID string) context.Context {
+	return context.WithValue(ctx, ownerIDKey, ownerID)
+}
+
+// OwnerIDFromContext extracts the trace owner ID from context, if set.
+func OwnerIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ownerIDKey).(string)
+	return v, ok
+}
+
 // MetricsRecorder is an optional interface for recording trace metrics.
 type MetricsRecorder interface {
 	IncTrace(action string)
@@ -51,9 +66,11 @@ func (t *Tracer) SetMetrics(m MetricsRecorder) {
 	t.metrics = m
 }
 
-// Record enqueues a trace entry for async storage (no owner ID — legacy API).
+// Record enqueues a trace entry for async storage.
+// Extracts owner ID from context if available.
 func (t *Tracer) Record(ctx context.Context, agentName, action string, details any) {
-	t.RecordWithOwner(ctx, "", agentName, action, details)
+	ownerID, _ := OwnerIDFromContext(ctx)
+	t.RecordWithOwner(ctx, ownerID, agentName, action, details)
 }
 
 // RecordWithOwner enqueues a trace entry with an explicit owner ID.
@@ -80,9 +97,11 @@ func (t *Tracer) RecordWithOwner(ctx context.Context, ownerID, agentName, action
 	)
 }
 
-// RecordError enqueues a trace entry with an error (no owner ID — legacy API).
+// RecordError enqueues a trace entry with an error.
+// Extracts owner ID from context if available.
 func (t *Tracer) RecordError(ctx context.Context, agentName, action string, details any, traceErr error) {
-	t.RecordErrorWithOwner(ctx, "", agentName, action, details, traceErr)
+	ownerID, _ := OwnerIDFromContext(ctx)
+	t.RecordErrorWithOwner(ctx, ownerID, agentName, action, details, traceErr)
 }
 
 // RecordErrorWithOwner enqueues a trace entry with an error and explicit owner ID.

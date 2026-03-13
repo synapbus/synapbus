@@ -12,6 +12,7 @@ import (
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
 	"github.com/smart-mcp-proxy/synapbus/internal/search"
+	"github.com/smart-mcp-proxy/synapbus/internal/trace"
 )
 
 // MCPServer wraps the mcp-go server with SynapBus services.
@@ -71,7 +72,11 @@ func NewMCPServer(
 		server.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			// Propagate agent identity from HTTP auth to MCP context
 			if agent, ok := agents.AgentFromContext(r.Context()); ok {
-				return ContextWithAgentName(ctx, agent.Name)
+				ctx = ContextWithAgentName(ctx, agent.Name)
+				// Propagate owner ID for trace recording
+				if ownerID, ok := trace.OwnerIDFromContext(r.Context()); ok {
+					ctx = trace.ContextWithOwnerID(ctx, ownerID)
+				}
 			}
 			return ctx
 		}),
