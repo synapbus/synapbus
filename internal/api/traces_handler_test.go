@@ -81,7 +81,7 @@ func TestListTraces_OwnerIsolation(t *testing.T) {
 	seedTraces(t, store, "1", "alice-bot", []string{"send_message", "read_inbox", "send_message"})
 	seedTraces(t, store, "2", "bob-bot", []string{"send_message", "error"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 
 	t.Run("owner 1 sees only own traces", func(t *testing.T) {
 		rr := makeRequest(t, router, "GET", "/api/traces", "1")
@@ -141,7 +141,7 @@ func TestListTraces_Filters(t *testing.T) {
 	seedTraces(t, store, "1", "agent-a", []string{"send_message", "read_inbox", "send_message", "error"})
 	seedTraces(t, store, "1", "agent-b", []string{"send_message", "join_channel"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 
 	t.Run("filter by agent_name", func(t *testing.T) {
 		rr := makeRequest(t, router, "GET", "/api/traces?agent_name=agent-a", "1")
@@ -223,7 +223,7 @@ func TestListTraces_ResponseFormat(t *testing.T) {
 
 	seedTraces(t, store, "1", "agent", []string{"send_message"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 	rr := makeRequest(t, router, "GET", "/api/traces", "1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -267,7 +267,7 @@ func TestTraceStats(t *testing.T) {
 
 	seedTraces(t, store, "1", "agent", []string{"send_message", "send_message", "read_inbox", "error"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 	rr := makeRequest(t, router, "GET", "/api/traces/stats", "1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -288,7 +288,7 @@ func TestExportTraces_JSON(t *testing.T) {
 
 	seedTraces(t, store, "1", "agent", []string{"send_message", "read_inbox"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 	rr := makeRequest(t, router, "GET", "/api/traces/export?format=json", "1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -318,7 +318,7 @@ func TestExportTraces_CSV(t *testing.T) {
 
 	seedTraces(t, store, "1", "agent", []string{"send_message", "read_inbox"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 	rr := makeRequest(t, router, "GET", "/api/traces/export?format=csv", "1")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -353,7 +353,7 @@ func TestExportTraces_Empty(t *testing.T) {
 	db := newTestDB(t)
 	store := trace.NewSQLiteTraceStore(db)
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 
 	t.Run("empty JSON export", func(t *testing.T) {
 		rr := makeRequest(t, router, "GET", "/api/traces/export?format=json", "1")
@@ -400,7 +400,7 @@ func TestMetricsEndpoint(t *testing.T) {
 		metrics.IncError()
 		metrics.SetActiveAgents(3)
 
-		router := NewRouter(store, metrics)
+		router := NewRouter(store, metrics, nil)
 		rr := makeRequest(t, router, "GET", "/metrics", "")
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d", rr.Code)
@@ -426,7 +426,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	})
 
 	t.Run("metrics disabled returns 404", func(t *testing.T) {
-		router := NewRouter(store, nil)
+		router := NewRouter(store, nil, nil)
 		rr := makeRequest(t, router, "GET", "/metrics", "")
 		if rr.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
@@ -443,7 +443,7 @@ func TestMultiOwnerIsolation(t *testing.T) {
 	seedTraces(t, store, "2", "bob-bot", []string{"send_message", "error", "join_channel"})
 	seedTraces(t, store, "3", "charlie-bot", []string{"send_message"})
 
-	router := NewRouter(store, nil)
+	router := NewRouter(store, nil, nil)
 
 	for _, tc := range []struct {
 		ownerID       string

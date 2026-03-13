@@ -5,12 +5,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
 	"github.com/smart-mcp-proxy/synapbus/internal/trace"
 )
 
 // NewRouter creates a chi router with all API routes configured.
 // metricsInstance may be nil if metrics are disabled.
-func NewRouter(traceStore trace.TraceStore, metricsInstance *trace.Metrics) chi.Router {
+// attachmentService may be nil if attachments are not configured.
+func NewRouter(traceStore trace.TraceStore, metricsInstance *trace.Metrics, attachmentService *attachments.Service) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -27,6 +29,17 @@ func NewRouter(traceStore trace.TraceStore, metricsInstance *trace.Metrics) chi.
 		r.Get("/api/traces/export", tracesHandler.ExportTraces)
 		r.Get("/api/traces/stats", tracesHandler.TraceStats)
 	})
+
+	// Attachment API routes (for Web UI)
+	if attachmentService != nil {
+		attachmentsHandler := NewAttachmentsHandler(attachmentService)
+		r.Get("/api/attachments/{hash}", attachmentsHandler.Download)
+		r.Get("/api/attachments/{hash}/meta", attachmentsHandler.Metadata)
+		r.Group(func(r chi.Router) {
+			r.Use(OwnerAuthMiddleware)
+			r.Post("/api/attachments", attachmentsHandler.Upload)
+		})
+	}
 
 	// Metrics endpoint (unauthenticated, only registered when enabled)
 	if metricsInstance != nil {

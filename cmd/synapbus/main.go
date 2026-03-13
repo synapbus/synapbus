@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
 	"github.com/smart-mcp-proxy/synapbus/internal/api"
+	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
 	"github.com/smart-mcp-proxy/synapbus/internal/auth"
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
@@ -180,6 +182,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	channelStore := channels.NewSQLiteChannelStore(db.DB)
 	channelService := channels.NewService(channelStore, msgService, tracer)
 
+	// Create attachment service
+	attachmentsDir := filepath.Join(dataDir, "attachments")
+	cas, err := attachments.NewCAS(attachmentsDir, slog.Default())
+	if err != nil {
+		return fmt.Errorf("create CAS engine: %w", err)
+	}
+	attachmentStore := attachments.NewSQLiteStore(db.DB, slog.Default())
+	attachmentService := attachments.NewService(attachmentStore, cas, slog.Default())
+	slog.Info("attachment service initialized", "dir", attachmentsDir)
+
 	// Initialize auth subsystem
 	authSecret := make([]byte, 32)
 	if _, err := rand.Read(authSecret); err != nil {
@@ -221,7 +233,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create MCP server
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, attachmentService)
 	startTime := time.Now()
 
 	// Set up chi router
@@ -250,8 +262,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// MCP SSE endpoint
 	r.Mount("/mcp", mcpSrv.SSEHandler())
 
-	// Mount API routes (traces, export, stats, metrics)
-	apiRouter := api.NewRouter(traceStore, metrics)
+	// Mount API routes (traces, export, stats, metrics, attachments)
+	apiRouter := api.NewRouter(traceStore, metrics, attachmentService)
 	r.Mount("/", apiRouter)
 
 	// Start HTTP server
