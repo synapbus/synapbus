@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
 	"github.com/smart-mcp-proxy/synapbus/internal/api"
+	"github.com/smart-mcp-proxy/synapbus/internal/auth"
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
@@ -177,6 +180,46 @@ func runServe(cmd *cobra.Command, args []string) error {
 	channelStore := channels.NewSQLiteChannelStore(db.DB)
 	channelService := channels.NewService(channelStore, msgService, tracer)
 
+	// Initialize auth subsystem
+	authSecret := make([]byte, 32)
+	if _, err := rand.Read(authSecret); err != nil {
+		return fmt.Errorf("generate auth secret: %w", err)
+	}
+
+	authCfg := auth.DefaultConfig()
+	authCfg.Secret = authSecret
+	authCfg.DevMode = true
+	authCfg.IssuerURL = fmt.Sprintf("http://localhost:%d", port)
+
+	userStore := auth.NewSQLiteUserStore(db.DB, authCfg.BcryptCost)
+	sessionStore := auth.NewSQLiteSessionStore(db.DB)
+	clientStore := auth.NewSQLiteClientStore(db.DB, authCfg.BcryptCost)
+	fositeStore := auth.NewFositeStore(db.DB, authCfg.BcryptCost)
+	oauthProvider := auth.NewOAuthProvider(authCfg, fositeStore)
+	authHandlers := auth.NewHandlers(userStore, sessionStore, clientStore, oauthProvider, authCfg)
+
+	// Create initial admin user if no users exist
+	userCount, err := userStore.CountUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("count users: %w", err)
+	}
+	if userCount == 0 {
+		adminPassword := generateRandomPassword()
+		if _, err := userStore.CreateUser(ctx, "admin", adminPassword, "Admin"); err != nil {
+			return fmt.Errorf("create admin user: %w", err)
+		}
+		slog.Info("initial admin user created",
+			"username", "admin",
+			"password", adminPassword,
+		)
+		fmt.Printf("\n========================================\n")
+		fmt.Printf("  Initial admin account created\n")
+		fmt.Printf("  Username: admin\n")
+		fmt.Printf("  Password: %s\n", adminPassword)
+		fmt.Printf("  (Change this password after first login)\n")
+		fmt.Printf("========================================\n\n")
+	}
+
 	// Create MCP server
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService)
 	startTime := time.Now()
@@ -186,6 +229,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Health endpoint (no auth)
 	r.Get("/health", mcpserver.NewHealthHandler(mcpSrv.ConnectionManager(), "0.1.0", startTime))
+
+	// Auth endpoints (public)
+	r.Post("/auth/register", authHandlers.HandleRegister)
+	r.Post("/auth/login", authHandlers.HandleLogin)
+
+	// OAuth endpoints
+	r.Get("/oauth/authorize", authHandlers.HandleAuthorize)
+	r.Post("/oauth/token", authHandlers.HandleToken)
+	r.Post("/oauth/introspect", authHandlers.HandleIntrospect)
+
+	// Protected auth endpoints
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RequireSession(userStore, sessionStore))
+		r.Post("/auth/logout", authHandlers.HandleLogout)
+		r.Get("/auth/me", authHandlers.HandleMe)
+		r.Put("/auth/password", authHandlers.HandleChangePassword)
+	})
 
 	// MCP SSE endpoint
 	r.Mount("/mcp", mcpSrv.SSEHandler())
@@ -239,4 +299,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	slog.Info("SynapBus stopped")
 	return nil
+}
+
+// generateRandomPassword creates a cryptographically random password.
+func generateRandomPassword() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
