@@ -36,3 +36,4 @@ Thumbs.db
 
 # Debug
 __debug_bin*
+.claude/worktrees/
