@@ -11,13 +11,15 @@ import (
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
+	"github.com/smart-mcp-proxy/synapbus/internal/search"
 )
 
 // ToolRegistrar registers all SynapBus MCP tools on the given server.
 type ToolRegistrar struct {
-	msgService   *messaging.MessagingService
-	agentService *agents.AgentService
-	logger       *slog.Logger
+	msgService    *messaging.MessagingService
+	agentService  *agents.AgentService
+	searchService *search.Service
+	logger        *slog.Logger
 }
 
 // NewToolRegistrar creates a new tool registrar.
@@ -27,6 +29,11 @@ func NewToolRegistrar(msgService *messaging.MessagingService, agentService *agen
 		agentService: agentService,
 		logger:       slog.Default().With("component", "mcp-tools"),
 	}
+}
+
+// SetSearchService sets the search service for semantic search support.
+func (tr *ToolRegistrar) SetSearchService(svc *search.Service) {
+	tr.searchService = svc
 }
 
 // RegisterAll registers all tools on the MCP server.
@@ -87,12 +94,14 @@ func (tr *ToolRegistrar) markDoneTool() mcp.Tool {
 
 func (tr *ToolRegistrar) searchMessagesTool() mcp.Tool {
 	return mcp.NewTool("search_messages",
-		mcp.WithDescription("Search messages using full-text search"),
-		mcp.WithString("query", mcp.Description("Search query string")),
-		mcp.WithNumber("limit", mcp.Description("Maximum results to return (default 20)")),
+		mcp.WithDescription("Search messages using semantic search (if configured) or full-text search. Returns messages ranked by relevance."),
+		mcp.WithString("query", mcp.Description("Search query string — supports natural language for semantic search")),
+		mcp.WithNumber("limit", mcp.Description("Maximum results to return (default 10, max 100)")),
 		mcp.WithNumber("min_priority", mcp.Description("Minimum priority filter (1-10)")),
 		mcp.WithString("from_agent", mcp.Description("Filter by sender agent name")),
 		mcp.WithString("status", mcp.Description("Filter by message status")),
+		mcp.WithString("search_mode", mcp.Description("Search mode: 'auto' (default), 'semantic', or 'fulltext'")),
+		mcp.WithBoolean("semantic", mcp.Description("Force semantic search (shorthand for search_mode='semantic')")),
 	)
 }
 
@@ -264,21 +273,77 @@ func (tr *ToolRegistrar) handleSearchMessages(ctx context.Context, req mcp.CallT
 	}
 
 	query := req.GetString("query", "")
-	opts := messaging.SearchOptions{
+
+	// If search service is available, use it for unified search
+	if tr.searchService != nil {
+		searchMode := req.GetString("search_mode", "auto")
+
+		// Handle boolean "semantic" shorthand
+		args := req.GetArguments()
+		if v, ok := args["semantic"]; ok {
+			if b, ok := v.(bool); ok && b {
+				searchMode = "semantic"
+			}
+		}
+
+		opts := search.SearchOptions{
+			Query:       query,
+			Mode:        searchMode,
+			Limit:       req.GetInt("limit", 10),
+			FromAgent:   req.GetString("from_agent", ""),
+			MinPriority: req.GetInt("min_priority", 0),
+		}
+
+		resp, err := tr.searchService.Search(ctx, agentName, opts)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("search_messages failed: %s", err)), nil
+		}
+
+		// Format results
+		resultMsgs := make([]map[string]any, len(resp.Results))
+		for i, r := range resp.Results {
+			entry := map[string]any{
+				"message":    r.Message,
+				"match_type": r.MatchType,
+			}
+			if r.SimilarityScore > 0 {
+				entry["similarity_score"] = r.SimilarityScore
+			}
+			if r.RelevanceScore > 0 {
+				entry["relevance_score"] = r.RelevanceScore
+			}
+			resultMsgs[i] = entry
+		}
+
+		result := map[string]any{
+			"results":       resultMsgs,
+			"count":         resp.TotalResults,
+			"search_mode":   resp.SearchMode,
+		}
+		if resp.Warning != "" {
+			result["warning"] = resp.Warning
+		}
+
+		return resultJSON(result)
+	}
+
+	// Fallback: use messaging service directly (no search service configured)
+	msgOpts := messaging.SearchOptions{
 		Limit:       req.GetInt("limit", 20),
 		MinPriority: req.GetInt("min_priority", 0),
 		FromAgent:   req.GetString("from_agent", ""),
 		Status:      req.GetString("status", ""),
 	}
 
-	messages, err := tr.msgService.SearchMessages(ctx, agentName, query, opts)
+	messages, err := tr.msgService.SearchMessages(ctx, agentName, query, msgOpts)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("search_messages failed: %s", err)), nil
 	}
 
 	return resultJSON(map[string]any{
-		"messages": messages,
-		"count":    len(messages),
+		"messages":     messages,
+		"count":        len(messages),
+		"search_mode":  "fulltext",
 	})
 }
 

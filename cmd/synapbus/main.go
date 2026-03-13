@@ -23,6 +23,8 @@ import (
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
+	"github.com/smart-mcp-proxy/synapbus/internal/search"
+	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
 	"github.com/smart-mcp-proxy/synapbus/internal/storage"
 	"github.com/smart-mcp-proxy/synapbus/internal/trace"
 )
@@ -220,8 +222,74 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("========================================\n\n")
 	}
 
+	// Initialize search subsystem
+	searchCfg := search.LoadConfigFromEnv()
+	var searchService *search.Service
+	var embPipeline *search.Pipeline
+	var vectorIndex *search.VectorIndex
+
+	if searchCfg.IsEnabled() {
+		slog.Info("initializing semantic search",
+			"provider", searchCfg.Provider,
+		)
+
+		// Create embedding provider
+		embProvider, err := embedding.NewProvider(searchCfg.Provider, searchCfg.APIKey, searchCfg.OllamaURL)
+		if err != nil {
+			slog.Warn("failed to create embedding provider, semantic search disabled",
+				"error", err,
+			)
+		} else {
+			// Create vector index
+			vectorIndex, err = search.NewVectorIndex(dataDir)
+			if err != nil {
+				slog.Warn("failed to create vector index, semantic search disabled",
+					"error", err,
+				)
+			} else {
+				embStore := search.NewEmbeddingStore(db.DB)
+
+				// Check for provider change
+				existingProvider, _ := embStore.GetEmbeddingProvider(ctx)
+				if existingProvider != "" && existingProvider != embProvider.Name() {
+					slog.Info("embedding provider changed, re-indexing",
+						"old_provider", existingProvider,
+						"new_provider", embProvider.Name(),
+					)
+					_ = embStore.DeleteAllEmbeddings(ctx)
+					_ = embStore.ClearQueue(ctx)
+					_ = vectorIndex.Rebuild(nil)
+				}
+
+				// Enqueue messages that need embedding
+				enqueued, _ := embStore.EnqueueAllMessages(ctx)
+				if enqueued > 0 {
+					slog.Info("enqueued messages for embedding", "count", enqueued)
+				}
+
+				// Create and start pipeline
+				embPipeline = search.NewPipeline(embProvider, embStore, vectorIndex, searchCfg)
+				embPipeline.Start(ctx)
+
+				// Create search service with semantic support
+				searchService = search.NewService(db.DB, embProvider, vectorIndex, msgService)
+				slog.Info("semantic search enabled",
+					"provider", embProvider.Name(),
+					"dimensions", embProvider.Dimensions(),
+					"index_size", vectorIndex.Len(),
+				)
+			}
+		}
+	}
+
+	// If no semantic search, create search service with FTS-only fallback
+	if searchService == nil {
+		searchService = search.NewService(db.DB, nil, nil, msgService)
+		slog.Info("semantic search not configured, using full-text search only")
+	}
+
 	// Create MCP server
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, searchService)
 	startTime := time.Now()
 
 	// Set up chi router
@@ -283,6 +351,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Stop embedding pipeline
+	if embPipeline != nil {
+		embPipeline.Stop()
+	}
+
+	// Save vector index
+	if vectorIndex != nil {
+		if err := vectorIndex.Save(); err != nil {
+			slog.Error("failed to save vector index", "error", err)
+		} else {
+			slog.Info("vector index saved", "size", vectorIndex.Len())
+		}
+	}
 
 	// Stop retention cleaner
 	if retentionCleaner != nil {
