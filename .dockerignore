@@ -1,0 +1,12 @@
+.git
+bin/
+data/
+web/node_modules/
+web/.svelte-kit/
+*.test
+*.out
+.env
+.env.*
+.claude/
+.specify/
+__pycache__/

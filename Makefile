@@ -1,4 +1,4 @@
-.PHONY: build test dev web clean lint
+.PHONY: build test dev web clean lint hooks
 
 BINARY := synapbus
 MODULE := github.com/smart-mcp-proxy/synapbus
@@ -28,5 +28,13 @@ clean:
 
 lint:
 	golangci-lint run ./...
+
+hooks:
+	@echo "Installing git hooks..."
+	@mkdir -p scripts/hooks
+	@chmod +x scripts/hooks/pre-commit scripts/hooks/pre-push
+	@ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+	@ln -sf ../../scripts/hooks/pre-push .git/hooks/pre-push
+	@echo "✅ Git hooks installed"
 
 .DEFAULT_GOAL := build

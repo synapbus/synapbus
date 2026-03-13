@@ -1,0 +1,6 @@
+apiVersion: v2
+name: synapbus
+description: Agent-to-agent messaging for AI swarms
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

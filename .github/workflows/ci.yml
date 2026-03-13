@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Run go vet
+        run: CGO_ENABLED=0 go vet ./...
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web frontend
+        run: |
+          cd web && npm install --legacy-peer-deps && npm run build
+
+      - name: Copy web assets
+        run: |
+          rm -rf internal/web/dist
+          cp -r web/build internal/web/dist
+
+      - name: Run tests
+        run: CGO_ENABLED=0 go test -count=1 -timeout 120s ./...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Verify binary builds
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/synapbus/

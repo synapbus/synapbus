@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Pre-push hook: full validation before pushing
+set -e
+
+echo "🔍 Pre-push checks..."
+
+# 1. Full test suite
+echo "  Running full test suite..."
+CGO_ENABLED=0 go test -count=1 -timeout 120s ./... || { echo "❌ tests failed"; exit 1; }
+
+# 2. Build verification
+echo "  Verifying build..."
+CGO_ENABLED=0 go build -o /dev/null ./cmd/synapbus/ || { echo "❌ build failed"; exit 1; }
+
+echo "✅ All pre-push checks passed"

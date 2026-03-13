@@ -1,0 +1,18 @@
+services:
+  synapbus:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - synapbus-data:/data
+    environment:
+      - SYNAPBUS_LOG_LEVEL=info
+      - SYNAPBUS_METRICS=true
+    restart: unless-stopped
+    # Note: healthcheck is omitted because the runtime image uses scratch,
+    # which has no shell, wget, or curl. Use an external health checker
+    # (e.g., Docker healthcheck with a sidecar, or orchestrator-level probes)
+    # to poll GET /healthz and GET /readyz on port 8080.
+
+volumes:
+  synapbus-data:
