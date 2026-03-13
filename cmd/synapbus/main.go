@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/smart-mcp-proxy/synapbus/internal/agents"
+	"github.com/smart-mcp-proxy/synapbus/internal/api"
 	"github.com/smart-mcp-proxy/synapbus/internal/channels"
 	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
 	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
@@ -22,8 +25,11 @@ import (
 )
 
 var (
-	port    int
-	dataDir string
+	port           int
+	dataDir        string
+	logLevel       string
+	metricsEnabled bool
+	traceRetention string
 )
 
 func main() {
@@ -41,13 +47,50 @@ func main() {
 
 	serveCmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	serveCmd.Flags().StringVar(&dataDir, "data", "./data", "Data directory for storage")
+	serveCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level: debug, info, warn, error")
+	serveCmd.Flags().BoolVar(&metricsEnabled, "metrics", false, "Enable Prometheus metrics endpoint at /metrics")
+	serveCmd.Flags().StringVar(&traceRetention, "trace-retention", "0", "Trace retention period (e.g. 30d, 90d, 0 for unlimited)")
 
 	rootCmd.AddCommand(serveCmd)
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		slog.Error("command failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+// parseLogLevel converts a string log level to slog.Level.
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// parseRetentionDuration parses a retention string like "30d", "90d", or "0".
+func parseRetentionDuration(s string) time.Duration {
+	if s == "" || s == "0" {
+		return 0
+	}
+	// Try parsing as "Nd" format (days)
+	if strings.HasSuffix(s, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	// Try standard duration parsing
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -58,6 +101,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if d := os.Getenv("SYNAPBUS_DATA_DIR"); d != "" {
 		dataDir = d
 	}
+	if ll := os.Getenv("SYNAPBUS_LOG_LEVEL"); ll != "" {
+		logLevel = ll
+	}
+	if me := os.Getenv("SYNAPBUS_METRICS"); me != "" {
+		metricsEnabled = me == "true" || me == "1"
+	}
+	if tr := os.Getenv("SYNAPBUS_TRACE_RETENTION"); tr != "" {
+		traceRetention = tr
+	}
+
+	// Configure slog with JSON handler
+	level := parseLogLevel(logLevel)
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -65,6 +123,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	slog.Info("starting SynapBus",
 		"port", port,
 		"data_dir", dataDir,
+		"log_level", logLevel,
+		"metrics_enabled", metricsEnabled,
+		"trace_retention", traceRetention,
 	)
 
 	// Initialize SQLite database
@@ -83,6 +144,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create tracer
 	tracer := trace.NewTracer(db.DB)
 	defer tracer.Close()
+
+	// Set up metrics
+	var metrics *trace.Metrics
+	if metricsEnabled {
+		metrics = trace.NewMetrics()
+		tracer.SetMetrics(metrics)
+		slog.Info("prometheus metrics enabled")
+	}
+
+	// Create trace store
+	traceStore := trace.NewSQLiteTraceStore(db.DB)
+
+	// Set up trace retention cleanup
+	retentionDuration := parseRetentionDuration(traceRetention)
+	var retentionCleaner *trace.RetentionCleaner
+	if retentionDuration > 0 {
+		retentionCleaner = trace.NewRetentionCleaner(traceStore, retentionDuration, 1*time.Hour)
+		retentionCleaner.Start()
+		slog.Info("trace retention cleanup enabled",
+			"retention", retentionDuration.String(),
+		)
+	}
 
 	// Create services
 	msgStore := messaging.NewSQLiteMessageStore(db.DB)
@@ -106,6 +189,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// MCP SSE endpoint
 	r.Mount("/mcp", mcpSrv.SSEHandler())
+
+	// Mount API routes (traces, export, stats, metrics)
+	apiRouter := api.NewRouter(traceStore, metrics)
+	r.Mount("/", apiRouter)
 
 	// Start HTTP server
 	addr := fmt.Sprintf(":%d", port)
@@ -136,6 +223,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Stop retention cleaner
+	if retentionCleaner != nil {
+		retentionCleaner.Stop()
+	}
 
 	if err := mcpSrv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("MCP server shutdown error", "error", err)

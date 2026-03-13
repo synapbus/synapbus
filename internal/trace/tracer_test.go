@@ -18,7 +18,7 @@ func newTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	// Create traces table
+	// Create traces table with owner_id (matches migration 001 + 002)
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS traces (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +26,8 @@ func newTestDB(t *testing.T) *sql.DB {
 			action TEXT NOT NULL,
 			details TEXT NOT NULL DEFAULT '{}',
 			error TEXT,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			owner_id TEXT NOT NULL DEFAULT ''
 		)
 	`)
 	if err != nil {
@@ -38,10 +39,10 @@ func newTestDB(t *testing.T) *sql.DB {
 
 func TestTracer_Record(t *testing.T) {
 	tests := []struct {
-		name      string
-		agent     string
-		action    string
-		details   any
+		name    string
+		agent   string
+		action  string
+		details any
 	}{
 		{
 			name:   "simple trace",
@@ -59,9 +60,9 @@ func TestTracer_Record(t *testing.T) {
 			details: nil,
 		},
 		{
-			name:   "trace with string details",
-			agent:  "agent-b",
-			action: "search",
+			name:    "trace with string details",
+			agent:   "agent-b",
+			action:  "search",
 			details: "query string",
 		},
 	}
@@ -76,7 +77,7 @@ func TestTracer_Record(t *testing.T) {
 			tracer.Record(ctx, tt.agent, tt.action, tt.details)
 
 			// Give async writer time to process
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 
 			// Verify trace was written
 			var count int
@@ -94,6 +95,28 @@ func TestTracer_Record(t *testing.T) {
 	}
 }
 
+func TestTracer_RecordWithOwner(t *testing.T) {
+	db := newTestDB(t)
+	tracer := NewTracer(db)
+	defer tracer.Close()
+
+	ctx := context.Background()
+	tracer.RecordWithOwner(ctx, "42", "test-agent", "send_message", map[string]any{"to": "other"})
+
+	time.Sleep(200 * time.Millisecond)
+
+	var ownerID string
+	err := db.QueryRow(
+		"SELECT owner_id FROM traces WHERE agent_name = 'test-agent'",
+	).Scan(&ownerID)
+	if err != nil {
+		t.Fatalf("query trace: %v", err)
+	}
+	if ownerID != "42" {
+		t.Errorf("owner_id = %q, want %q", ownerID, "42")
+	}
+}
+
 func TestTracer_RecordError(t *testing.T) {
 	db := newTestDB(t)
 	tracer := NewTracer(db)
@@ -105,7 +128,7 @@ func TestTracer_RecordError(t *testing.T) {
 		fmt.Errorf("something went wrong"),
 	)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	var errorText sql.NullString
 	err := db.QueryRow(
@@ -116,6 +139,91 @@ func TestTracer_RecordError(t *testing.T) {
 	}
 	if !errorText.Valid || errorText.String != "something went wrong" {
 		t.Errorf("error = %v, want 'something went wrong'", errorText)
+	}
+}
+
+func TestTracer_BatchFlush(t *testing.T) {
+	db := newTestDB(t)
+	tracer := NewTracer(db)
+
+	ctx := context.Background()
+
+	// Record multiple entries to trigger batch
+	for i := 0; i < 10; i++ {
+		tracer.Record(ctx, "batch-agent", "action", map[string]any{"i": i})
+	}
+
+	// Close flushes remaining entries
+	tracer.Close()
+
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM traces WHERE agent_name = 'batch-agent'").Scan(&count)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 10 {
+		t.Errorf("got %d traces, want 10", count)
+	}
+}
+
+func TestTracer_GracefulShutdownFlushes(t *testing.T) {
+	db := newTestDB(t)
+	tracer := NewTracer(db)
+
+	ctx := context.Background()
+
+	// Record entries
+	tracer.Record(ctx, "shutdown-agent", "action1", nil)
+	tracer.Record(ctx, "shutdown-agent", "action2", nil)
+
+	// Close should flush
+	tracer.Close()
+
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM traces WHERE agent_name = 'shutdown-agent'").Scan(&count)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("got %d traces after shutdown, want 2", count)
+	}
+}
+
+func TestTracer_RecordReturnsImmediately(t *testing.T) {
+	db := newTestDB(t)
+	tracer := NewTracer(db)
+	defer tracer.Close()
+
+	ctx := context.Background()
+
+	start := time.Now()
+	tracer.Record(ctx, "fast-agent", "action", nil)
+	elapsed := time.Since(start)
+
+	// Record should return in under 5ms (it's async)
+	if elapsed > 5*time.Millisecond {
+		t.Errorf("Record took %v, expected < 5ms (should be non-blocking)", elapsed)
+	}
+}
+
+func TestTracer_Metrics(t *testing.T) {
+	db := newTestDB(t)
+	tracer := NewTracer(db)
+
+	metrics := NewMetrics()
+	tracer.SetMetrics(metrics)
+
+	ctx := context.Background()
+	tracer.RecordWithOwner(ctx, "1", "agent", "send_message", nil)
+	tracer.RecordErrorWithOwner(ctx, "1", "agent", "error", nil, fmt.Errorf("boom"))
+
+	tracer.Close()
+
+	if got := metrics.tracesTotal.Load(); got != 2 {
+		t.Errorf("tracesTotal = %d, want 2", got)
+	}
+	if got := metrics.errorsTotal.Load(); got != 1 {
+		t.Errorf("errorsTotal = %d, want 1", got)
 	}
 }
 

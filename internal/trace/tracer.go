@@ -6,26 +6,35 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"time"
 )
 
-// TraceEntry represents a single trace record.
+// TraceEntry represents a single trace record to be written.
 type TraceEntry struct {
+	OwnerID   string
 	AgentName string
 	Action    string
 	Details   any
 	Error     string
 }
 
-// Tracer records agent actions to the traces table.
-// It uses a buffered channel for async recording.
-type Tracer struct {
-	db     *sql.DB
-	logger *slog.Logger
-	ch     chan TraceEntry
-	done   chan struct{}
+// MetricsRecorder is an optional interface for recording trace metrics.
+type MetricsRecorder interface {
+	IncTrace(action string)
+	IncError()
 }
 
-// NewTracer creates a new Tracer with a buffered channel.
+// Tracer records agent actions to the traces table.
+// It uses a buffered channel for async recording and batches writes.
+type Tracer struct {
+	db      *sql.DB
+	logger  *slog.Logger
+	ch      chan TraceEntry
+	done    chan struct{}
+	metrics MetricsRecorder
+}
+
+// NewTracer creates a new Tracer with a buffered channel and batch writing.
 func NewTracer(db *sql.DB) *Tracer {
 	t := &Tracer{
 		db:     db,
@@ -37,9 +46,20 @@ func NewTracer(db *sql.DB) *Tracer {
 	return t
 }
 
-// Record enqueues a trace entry for async storage.
+// SetMetrics sets the metrics recorder for the tracer.
+func (t *Tracer) SetMetrics(m MetricsRecorder) {
+	t.metrics = m
+}
+
+// Record enqueues a trace entry for async storage (no owner ID — legacy API).
 func (t *Tracer) Record(ctx context.Context, agentName, action string, details any) {
+	t.RecordWithOwner(ctx, "", agentName, action, details)
+}
+
+// RecordWithOwner enqueues a trace entry with an explicit owner ID.
+func (t *Tracer) RecordWithOwner(ctx context.Context, ownerID, agentName, action string, details any) {
 	entry := TraceEntry{
+		OwnerID:   ownerID,
 		AgentName: agentName,
 		Action:    action,
 		Details:   details,
@@ -60,9 +80,15 @@ func (t *Tracer) Record(ctx context.Context, agentName, action string, details a
 	)
 }
 
-// RecordError enqueues a trace entry with an error.
+// RecordError enqueues a trace entry with an error (no owner ID — legacy API).
 func (t *Tracer) RecordError(ctx context.Context, agentName, action string, details any, traceErr error) {
+	t.RecordErrorWithOwner(ctx, "", agentName, action, details, traceErr)
+}
+
+// RecordErrorWithOwner enqueues a trace entry with an error and explicit owner ID.
+func (t *Tracer) RecordErrorWithOwner(ctx context.Context, ownerID, agentName, action string, details any, traceErr error) {
 	entry := TraceEntry{
+		OwnerID:   ownerID,
 		AgentName: agentName,
 		Action:    action,
 		Details:   details,
@@ -89,37 +115,99 @@ func (t *Tracer) Close() {
 
 func (t *Tracer) processLoop() {
 	defer close(t.done)
-	for entry := range t.ch {
-		t.writeEntry(entry)
+
+	batch := make([]TraceEntry, 0, 64)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case entry, ok := <-t.ch:
+			if !ok {
+				// Channel closed, flush remaining
+				if len(batch) > 0 {
+					t.writeBatch(batch)
+				}
+				return
+			}
+			batch = append(batch, entry)
+			if len(batch) >= 64 {
+				t.writeBatch(batch)
+				batch = batch[:0]
+			}
+		case <-ticker.C:
+			if len(batch) > 0 {
+				t.writeBatch(batch)
+				batch = batch[:0]
+			}
+		}
 	}
 }
 
-func (t *Tracer) writeEntry(entry TraceEntry) {
-	detailsJSON, err := json.Marshal(entry.Details)
+func (t *Tracer) writeBatch(entries []TraceEntry) {
+	tx, err := t.db.Begin()
 	if err != nil {
-		t.logger.Error("failed to marshal trace details",
+		t.logger.Error("failed to begin trace batch transaction",
 			"error", err,
-			"agent", entry.AgentName,
-			"action", entry.Action,
+			"batch_size", len(entries),
 		)
-		detailsJSON = []byte("{}")
+		return
 	}
 
-	var traceErr sql.NullString
-	if entry.Error != "" {
-		traceErr = sql.NullString{String: entry.Error, Valid: true}
-	}
-
-	_, err = t.db.Exec(
-		`INSERT INTO traces (agent_name, action, details, error, created_at)
-		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-		entry.AgentName, entry.Action, string(detailsJSON), traceErr,
+	stmt, err := tx.Prepare(
+		`INSERT INTO traces (owner_id, agent_name, action, details, error, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
-		t.logger.Error("failed to write trace entry",
+		t.logger.Error("failed to prepare trace insert",
 			"error", err,
-			"agent", entry.AgentName,
-			"action", entry.Action,
+		)
+		tx.Rollback()
+		return
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, entry := range entries {
+		detailsJSON, marshalErr := json.Marshal(entry.Details)
+		if marshalErr != nil {
+			t.logger.Error("failed to marshal trace details",
+				"error", marshalErr,
+				"agent", entry.AgentName,
+				"action", entry.Action,
+			)
+			detailsJSON = []byte("{}")
+		}
+
+		var traceErr sql.NullString
+		if entry.Error != "" {
+			traceErr = sql.NullString{String: entry.Error, Valid: true}
+		}
+
+		_, execErr := stmt.Exec(
+			entry.OwnerID, entry.AgentName, entry.Action, string(detailsJSON), traceErr, now,
+		)
+		if execErr != nil {
+			t.logger.Error("failed to write trace entry",
+				"error", execErr,
+				"agent", entry.AgentName,
+				"action", entry.Action,
+			)
+		}
+
+		// Record metrics
+		if t.metrics != nil {
+			t.metrics.IncTrace(entry.Action)
+			if entry.Error != "" {
+				t.metrics.IncError()
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.logger.Error("failed to commit trace batch",
+			"error", err,
+			"batch_size", len(entries),
 		)
 	}
 }
