@@ -44,7 +44,7 @@ jobs:
 
       - name: Build web frontend
         run: |
-          cd web && npm ci && npm run build
+          cd web && npm install --legacy-peer-deps && npm run build
 
       - name: Copy web assets
         run: |
@@ -99,7 +99,7 @@ jobs:
 
       - name: Build web frontend
         run: |
-          cd web && npm ci && npm run build
+          cd web && npm install --legacy-peer-deps && npm run build
 
       - name: Copy web assets
         run: |
