@@ -314,6 +314,18 @@ func (s *MessagingService) SearchMessages(ctx context.Context, agentName, query 
 	return messages, nil
 }
 
+// GetMessageByID returns a single message by its ID.
+func (s *MessagingService) GetMessageByID(ctx context.Context, id int64) (*Message, error) {
+	msg, err := s.store.GetMessageByID(ctx, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("message not found: %d", id)
+		}
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	return msg, nil
+}
+
 // GetConversation returns a conversation and its messages.
 func (s *MessagingService) GetConversation(ctx context.Context, id int64) (*Conversation, []*Message, error) {
 	conv, err := s.store.GetConversation(ctx, id)

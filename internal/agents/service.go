@@ -209,6 +209,52 @@ func (s *AgentService) ListAgents(ctx context.Context, ownerID int64) ([]*Agent,
 	return s.store.ListAgentsByOwner(ctx, ownerID)
 }
 
+// RevokeKey generates a new API key for an agent. Only the owner can do this.
+// Returns the agent and the new raw API key (shown once).
+func (s *AgentService) RevokeKey(ctx context.Context, name string, ownerID int64) (*Agent, string, error) {
+	agent, err := s.store.GetAgentByName(ctx, name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, "", fmt.Errorf("agent not found: %s", name)
+		}
+		return nil, "", err
+	}
+
+	if agent.OwnerID != ownerID {
+		return nil, "", fmt.Errorf("only the agent's owner can revoke its API key")
+	}
+
+	// Generate new API key
+	apiKey, err := generateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate API key: %w", err)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(apiKey), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, "", fmt.Errorf("hash API key: %w", err)
+	}
+
+	agent.APIKeyHash = string(hash)
+	if err := s.store.UpdateAgent(ctx, agent); err != nil {
+		return nil, "", fmt.Errorf("update agent: %w", err)
+	}
+
+	s.logger.Info("agent API key revoked",
+		"name", name,
+		"owner_id", ownerID,
+	)
+
+	if s.tracer != nil {
+		s.tracer.Record(ctx, name, "revoke_api_key", map[string]any{
+			"agent_id": agent.ID,
+			"owner_id": ownerID,
+		})
+	}
+
+	return agent, apiKey, nil
+}
+
 // generateAPIKey creates a cryptographically random API key (32 bytes, hex encoded).
 func generateAPIKey() (string, error) {
 	b := make([]byte, 32)

@@ -18,7 +18,8 @@ dev:
 
 web:
 	cd web && npm install && npm run build
-	@echo "Svelte SPA built to internal/web/dist/"
+	rm -rf internal/web/dist
+	cp -r web/build internal/web/dist
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -16,7 +16,8 @@ data/
 web/node_modules/
 web/build/
 web/.svelte-kit/
-internal/web/dist/
+internal/web/dist/*
+!internal/web/dist/index.html
 
 # IDE
 .idea/

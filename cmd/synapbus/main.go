@@ -29,6 +29,7 @@ import (
 	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
 	"github.com/smart-mcp-proxy/synapbus/internal/storage"
 	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/smart-mcp-proxy/synapbus/internal/web"
 )
 
 var (
@@ -339,9 +340,25 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// MCP SSE endpoint
 	r.Mount("/mcp", mcpSrv.SSEHandler())
 
-	// Mount API routes (traces, export, stats, metrics, attachments)
-	apiRouter := api.NewRouter(traceStore, metrics, attachmentService)
+	// Create SSE hub for real-time events
+	sseHub := api.NewSSEHub()
+
+	// Mount API routes (traces, export, stats, metrics, attachments, messages, agents, channels, SSE)
+	sessionMiddleware := api.SessionToOwnerMiddleware(userStore, sessionStore)
+	apiRouter := api.NewRouterWithConfig(api.RouterConfig{
+		TraceStore:        traceStore,
+		Metrics:           metrics,
+		AttachmentService: attachmentService,
+		MsgService:        msgService,
+		AgentService:      agentService,
+		ChannelService:    channelService,
+		SSEHub:            sseHub,
+		SessionMiddleware: sessionMiddleware,
+	})
 	r.Mount("/", apiRouter)
+
+	// Serve embedded Web UI SPA (catch-all for non-API routes)
+	r.NotFound(web.NewSPAHandler().ServeHTTP)
 
 	// Start HTTP server
 	addr := fmt.Sprintf(":%d", port)
