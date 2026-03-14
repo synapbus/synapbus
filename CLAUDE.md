@@ -2,7 +2,7 @@
 
 Local-first, MCP-native agent-to-agent messaging service. Single Go binary with embedded storage, semantic search, and a Slack-like Web UI.
 
-**Repo**: github.com/smart-mcp-proxy/synapbus
+**Repo**: github.com/synapbus/synapbus
 **License**: Apache 2.0
 
 ## Tech Stack

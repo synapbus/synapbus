@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/storage"
+	"github.com/synapbus/synapbus/internal/storage"
 )
 
 func newTestDB(t *testing.T) *sql.DB {

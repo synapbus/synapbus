@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
+	"github.com/synapbus/synapbus/internal/attachments"
 )
 
 // AttachmentsHandler provides REST API endpoints for attachment operations.

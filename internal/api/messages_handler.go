@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/messaging"
 )
 
 // MessagesHandler handles REST API requests for messages.

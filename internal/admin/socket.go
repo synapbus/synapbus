@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // Request is the JSON-RPC style request sent over the admin socket.

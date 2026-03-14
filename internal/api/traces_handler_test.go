@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trace"
 
 	_ "modernc.org/sqlite"
 )

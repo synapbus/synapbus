@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/search/embedding"
 )
 
 // SearchMode constants.

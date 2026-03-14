@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/auth"
+	"github.com/synapbus/synapbus/internal/auth"
 )
 
 // SessionToOwnerMiddleware wraps RequireSession and extracts the owner ID

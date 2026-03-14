@@ -9,10 +9,10 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
-	"github.com/smart-mcp-proxy/synapbus/internal/storage"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/search/embedding"
+	"github.com/synapbus/synapbus/internal/storage"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 func newPipelineTestDB(t *testing.T) *sql.DB {

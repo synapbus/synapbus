@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // SwarmService handles task auction and stigmergy patterns.

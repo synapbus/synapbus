@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 func TestAuthMiddleware(t *testing.T) {

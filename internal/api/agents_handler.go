@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // AgentsHandler handles REST API requests for agents.

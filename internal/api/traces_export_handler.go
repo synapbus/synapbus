@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // ExportTraces handles GET /api/traces/export.

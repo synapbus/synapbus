@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
+	"github.com/synapbus/synapbus/internal/search/embedding"
 )
 
 // Pipeline processes unembedded messages in the background.

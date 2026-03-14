@@ -19,22 +19,23 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/admin"
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
-	"github.com/smart-mcp-proxy/synapbus/internal/api"
-	"github.com/smart-mcp-proxy/synapbus/internal/apikeys"
-	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
-	"github.com/smart-mcp-proxy/synapbus/internal/auth"
-	"github.com/smart-mcp-proxy/synapbus/internal/channels"
-	"github.com/smart-mcp-proxy/synapbus/internal/health"
-	mcpserver "github.com/smart-mcp-proxy/synapbus/internal/mcp"
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	prommetrics "github.com/smart-mcp-proxy/synapbus/internal/metrics"
-	"github.com/smart-mcp-proxy/synapbus/internal/search"
-	"github.com/smart-mcp-proxy/synapbus/internal/search/embedding"
-	"github.com/smart-mcp-proxy/synapbus/internal/storage"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
-	"github.com/smart-mcp-proxy/synapbus/internal/web"
+	"github.com/synapbus/synapbus/internal/admin"
+	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/api"
+	"github.com/synapbus/synapbus/internal/apikeys"
+	"github.com/synapbus/synapbus/internal/attachments"
+	"github.com/synapbus/synapbus/internal/auth"
+	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/console"
+	"github.com/synapbus/synapbus/internal/health"
+	mcpserver "github.com/synapbus/synapbus/internal/mcp"
+	"github.com/synapbus/synapbus/internal/messaging"
+	prommetrics "github.com/synapbus/synapbus/internal/metrics"
+	"github.com/synapbus/synapbus/internal/search"
+	"github.com/synapbus/synapbus/internal/search/embedding"
+	"github.com/synapbus/synapbus/internal/storage"
+	"github.com/synapbus/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/web"
 )
 
 var (
@@ -140,11 +141,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		adminSocketPath = filepath.Join(dataDir, "synapbus.sock")
 	}
 
-	// Configure slog with JSON handler
+	// Configure slog with JSON handler writing to stderr (stdout is for console output)
 	level := parseLogLevel(logLevel)
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
+
+	// Create console printer for pretty output
+	con := console.New()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -333,7 +337,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	apiKeyService := apikeys.NewService(apiKeyStore)
 
 	// Create MCP server (with swarm + attachment + search tools)
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, con)
 	startTime := time.Now()
 
 	// Start task expiry worker
@@ -438,6 +442,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		slog.Info("HTTP server listening", "addr", addr)
+		// Pretty startup banner
+		con.Blank()
+		con.Success(fmt.Sprintf("SynapBus listening on %s", addr))
+		con.Success("MCP server ready")
+		con.Success(fmt.Sprintf("Web UI at http://localhost:%d", port))
+		con.Blank()
+		con.Info("Waiting for agents...")
+		con.Blank()
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			cancel()

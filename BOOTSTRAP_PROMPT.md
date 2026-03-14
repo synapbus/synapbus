@@ -8,7 +8,7 @@ I'm bootstrapping **SynapBus** — an open-source, local-first, MCP-native agent
 
 The project idea is fully described in `IDEA.md` — read it first.
 
-The repo is at https://github.com/smart-mcp-proxy/synapbus (public, empty).
+The repo is at https://github.com/synapbus/synapbus (public, empty).
 Domains: synapbus.com + synapbus.dev (to be registered).
 
 ## What I need you to do (in order):
@@ -175,7 +175,7 @@ After creating all specs, run `/speckit.tasks` for each spec to generate impleme
 
 ### 5. Create initial project files
 
-- `go.mod` with module `github.com/smart-mcp-proxy/synapbus`
+- `go.mod` with module `github.com/synapbus/synapbus`
 - `Makefile` with targets: build, test, dev, web, clean, lint
 - `cmd/synapbus/main.go` — cobra CLI with `serve` command (placeholder)
 - `schema/001_initial.sql` — SQLite migration for agents, messages, conversations, channels, channel_members, inbox_state, traces, attachments

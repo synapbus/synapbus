@@ -5,12 +5,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
-	"github.com/smart-mcp-proxy/synapbus/internal/apikeys"
-	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
-	"github.com/smart-mcp-proxy/synapbus/internal/channels"
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/apikeys"
+	"github.com/synapbus/synapbus/internal/attachments"
+	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // RouterConfig holds optional services for the API router.

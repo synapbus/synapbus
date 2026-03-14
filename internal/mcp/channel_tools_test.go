@@ -8,10 +8,10 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	_ "modernc.org/sqlite"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/channels"
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/storage"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/storage"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 func newTestChannelRegistrar(t *testing.T) (*ChannelToolRegistrar, *channels.Service) {

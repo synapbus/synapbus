@@ -8,11 +8,15 @@ import (
 
 // Connection represents an active agent connection.
 type Connection struct {
-	ID           string    `json:"id"`
-	AgentName    string    `json:"agent_name"`
-	Transport    string    `json:"transport"`
-	ConnectedAt  time.Time `json:"connected_at"`
-	LastActivity time.Time `json:"last_activity"`
+	ID                 string    `json:"id"`
+	AgentName          string    `json:"agent_name"`
+	Transport          string    `json:"transport"`
+	ConnectedAt        time.Time `json:"connected_at"`
+	LastActivity       time.Time `json:"last_activity"`
+	ClientName         string    `json:"client_name,omitempty"`
+	ClientVersion      string    `json:"client_version,omitempty"`
+	ProtocolVersion    string    `json:"protocol_version,omitempty"`
+	ClientCapabilities []string  `json:"client_capabilities,omitempty"`
 }
 
 // ConnectionManager tracks active MCP connections (thread-safe).

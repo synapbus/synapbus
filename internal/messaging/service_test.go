@@ -8,8 +8,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/storage"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/storage"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 func newTestService(t *testing.T) (*MessagingService, *sql.DB) {

@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/agents"
 )
 
 type mcpContextKey string

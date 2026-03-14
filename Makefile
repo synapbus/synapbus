@@ -1,7 +1,7 @@
 .PHONY: build test dev web clean lint hooks
 
 BINARY := synapbus
-MODULE := github.com/smart-mcp-proxy/synapbus
+MODULE := github.com/synapbus/synapbus
 BUILD_DIR := bin
 LDFLAGS := -s -w
 

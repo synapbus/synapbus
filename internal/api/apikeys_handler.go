@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/apikeys"
+	"github.com/synapbus/synapbus/internal/apikeys"
 )
 
 // APIKeysHandler handles REST API requests for API key management.

@@ -1,4 +1,4 @@
-module github.com/smart-mcp-proxy/synapbus
+module github.com/synapbus/synapbus
 
 go 1.25.0
 

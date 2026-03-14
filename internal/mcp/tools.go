@@ -9,9 +9,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/search"
+	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/search"
 )
 
 // ToolRegistrar registers all SynapBus MCP tools on the given server.

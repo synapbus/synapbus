@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/apikeys"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/apikeys"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 type contextKey string

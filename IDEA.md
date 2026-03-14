@@ -184,7 +184,7 @@ Agents interact with SynapBus entirely through MCP tools:
 - **Name**: SynapBus (synapse + bus — neural messaging bus)
 - **Domains**: synapbus.com ($11.28/yr), synapbus.dev ($12.98/yr)
 - **Website**: synapbus.dev (landing page + docs)
-- **Repo**: github.com/smart-mcp-proxy/synapbus
+- **Repo**: github.com/synapbus/synapbus
 - **License**: Apache 2.0
 
 ## MVP Scope (v0.1)

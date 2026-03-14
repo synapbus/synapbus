@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/agents"
-	"github.com/smart-mcp-proxy/synapbus/internal/auth"
-	"github.com/smart-mcp-proxy/synapbus/internal/channels"
-	"github.com/smart-mcp-proxy/synapbus/internal/messaging"
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/auth"
+	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // Services holds references to all services the admin socket can control.

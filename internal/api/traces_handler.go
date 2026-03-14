@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // TracesHandler handles REST API requests for trace data.

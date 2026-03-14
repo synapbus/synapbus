@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trace"
 )
 
 func TestExpiryWorker_ExpiresOverdueTasks(t *testing.T) {

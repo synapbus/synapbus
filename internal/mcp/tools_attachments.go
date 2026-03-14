@@ -10,7 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/attachments"
+	"github.com/synapbus/synapbus/internal/attachments"
 )
 
 // AttachmentToolRegistrar registers attachment MCP tools on the server.

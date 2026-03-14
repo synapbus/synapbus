@@ -10,7 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/smart-mcp-proxy/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/channels"
 )
 
 // SwarmToolRegistrar registers swarm-pattern MCP tools on the server.
