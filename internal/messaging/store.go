@@ -332,9 +332,11 @@ func (s *SQLiteMessageStore) SearchMessages(ctx context.Context, agentName, quer
 	var conditions []string
 	var args []any
 
-	// Scope to messages accessible by this agent
-	conditions = append(conditions, "(m.to_agent = ? OR m.from_agent = ?)")
-	args = append(args, agentName, agentName)
+	// Scope to messages accessible by this agent:
+	// - DMs where agent is sender or recipient
+	// - Channel messages where agent is a member
+	conditions = append(conditions, "(m.to_agent = ? OR m.from_agent = ? OR (m.channel_id IS NOT NULL AND m.to_agent = '' AND EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = m.channel_id AND cm.agent_name = ?)))")
+	args = append(args, agentName, agentName, agentName)
 
 	var joinClause string
 	var orderClause string

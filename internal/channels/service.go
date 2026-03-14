@@ -332,6 +332,11 @@ func (s *Service) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 	return s.store.GetChannel(ctx, id)
 }
 
+// IsMember checks if an agent is a member of a channel.
+func (s *Service) IsMember(ctx context.Context, channelID int64, agentName string) (bool, error) {
+	return s.store.IsMember(ctx, channelID, agentName)
+}
+
 // GetChannelByName returns a channel by name.
 func (s *Service) GetChannelByName(ctx context.Context, name string) (*Channel, error) {
 	return s.store.GetChannelByName(ctx, NormalizeChannelName(name))

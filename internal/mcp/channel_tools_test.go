@@ -31,7 +31,7 @@ func newTestChannelRegistrar(t *testing.T) (*ChannelToolRegistrar, *channels.Ser
 	db.Exec(`INSERT OR IGNORE INTO agents (name, display_name, type, capabilities, owner_id, api_key_hash, status) VALUES ('agent-b', 'Agent B', 'ai', '{}', 1, 'hash', 'active')`)
 	db.Exec(`INSERT OR IGNORE INTO agents (name, display_name, type, capabilities, owner_id, api_key_hash, status) VALUES ('agent-c', 'Agent C', 'ai', '{}', 1, 'hash', 'active')`)
 
-	registrar := NewChannelToolRegistrar(channelService)
+	registrar := NewChannelToolRegistrar(channelService, msgService)
 	return registrar, channelService
 }
 

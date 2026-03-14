@@ -8,17 +8,20 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/messaging"
 )
 
 // ChannelToolRegistrar registers channel MCP tools on the server.
 type ChannelToolRegistrar struct {
 	channelService *channels.Service
+	msgService     *messaging.MessagingService
 }
 
 // NewChannelToolRegistrar creates a new channel tool registrar.
-func NewChannelToolRegistrar(channelService *channels.Service) *ChannelToolRegistrar {
+func NewChannelToolRegistrar(channelService *channels.Service, msgService *messaging.MessagingService) *ChannelToolRegistrar {
 	return &ChannelToolRegistrar{
 		channelService: channelService,
+		msgService:     msgService,
 	}
 }
 
@@ -30,6 +33,7 @@ func (ctr *ChannelToolRegistrar) RegisterAll(s *server.MCPServer) {
 	s.AddTool(ctr.listChannelsTool(), ctr.handleListChannels)
 	s.AddTool(ctr.inviteToChannelTool(), ctr.handleInviteToChannel)
 	s.AddTool(ctr.kickFromChannelTool(), ctr.handleKickFromChannel)
+	s.AddTool(ctr.getChannelMessagesTool(), ctr.handleGetChannelMessages)
 	s.AddTool(ctr.sendChannelMessageTool(), ctr.handleSendChannelMessage)
 	s.AddTool(ctr.updateChannelTool(), ctr.handleUpdateChannel)
 }
@@ -84,6 +88,15 @@ func (ctr *ChannelToolRegistrar) kickFromChannelTool() mcp.Tool {
 		mcp.WithNumber("channel_id", mcp.Description("ID of the channel")),
 		mcp.WithString("channel_name", mcp.Description("Name of the channel (alternative to channel_id)")),
 		mcp.WithString("agent_name", mcp.Description("Name of the agent to kick"), mcp.Required()),
+	)
+}
+
+func (ctr *ChannelToolRegistrar) getChannelMessagesTool() mcp.Tool {
+	return mcp.NewTool("get_channel_messages",
+		mcp.WithDescription("Get recent messages from a channel you are a member of"),
+		mcp.WithNumber("channel_id", mcp.Description("ID of the channel")),
+		mcp.WithString("channel_name", mcp.Description("Name of the channel (alternative to channel_id)")),
+		mcp.WithNumber("limit", mcp.Description("Max number of messages to return (default 50, max 200)")),
 	)
 }
 
@@ -278,6 +291,58 @@ func (ctr *ChannelToolRegistrar) handleKickFromChannel(ctx context.Context, req 
 		"channel_id": channelID,
 		"agent_name": targetAgent,
 		"status":     "kicked",
+	})
+}
+
+func (ctr *ChannelToolRegistrar) handleGetChannelMessages(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	agentName, ok := extractAgentName(ctx)
+	if !ok {
+		return mcp.NewToolResultError("authentication required"), nil
+	}
+
+	channelID, err := ctr.resolveChannelID(ctx, req)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("get_channel_messages failed: %s", err)), nil
+	}
+
+	// Verify the agent is a member of the channel
+	isMember, err := ctr.channelService.IsMember(ctx, channelID, agentName)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("get_channel_messages failed: %s", err)), nil
+	}
+	if !isMember {
+		return mcp.NewToolResultError("you are not a member of this channel"), nil
+	}
+
+	limit := req.GetInt("limit", 50)
+	if limit > 200 {
+		limit = 200
+	}
+
+	messages, err := ctr.msgService.GetChannelMessages(ctx, channelID, limit)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("get_channel_messages failed: %s", err)), nil
+	}
+
+	result := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		result[i] = map[string]any{
+			"id":         msg.ID,
+			"from":       msg.FromAgent,
+			"body":       msg.Body,
+			"priority":   msg.Priority,
+			"status":     msg.Status,
+			"created_at": msg.CreatedAt,
+		}
+		if len(msg.Metadata) > 0 {
+			result[i]["metadata"] = msg.Metadata
+		}
+	}
+
+	return resultJSON(map[string]any{
+		"channel_id": channelID,
+		"messages":   result,
+		"count":      len(result),
 	})
 }
 

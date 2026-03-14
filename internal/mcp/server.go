@@ -146,7 +146,7 @@ func NewMCPServer(
 
 	// Register channel tools
 	if channelService != nil {
-		channelRegistrar := NewChannelToolRegistrar(channelService)
+		channelRegistrar := NewChannelToolRegistrar(channelService, msgService)
 		channelRegistrar.RegisterAll(mcpSrv)
 	}
 
