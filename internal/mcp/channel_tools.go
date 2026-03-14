@@ -53,7 +53,7 @@ func (ctr *ChannelToolRegistrar) createChannelTool() mcp.Tool {
 
 func (ctr *ChannelToolRegistrar) joinChannelTool() mcp.Tool {
 	return mcp.NewTool("join_channel",
-		mcp.WithDescription("Join an existing channel"),
+		mcp.WithDescription("Join a channel to participate in group conversations. You will receive messages sent to the channel after joining. Use list_channels first to see available channels."),
 		mcp.WithNumber("channel_id", mcp.Description("ID of the channel to join")),
 		mcp.WithString("channel_name", mcp.Description("Name of the channel to join (alternative to channel_id)")),
 	)
@@ -69,7 +69,7 @@ func (ctr *ChannelToolRegistrar) leaveChannelTool() mcp.Tool {
 
 func (ctr *ChannelToolRegistrar) listChannelsTool() mcp.Tool {
 	return mcp.NewTool("list_channels",
-		mcp.WithDescription("List all channels visible to the authenticated agent (all public channels plus private channels you are a member of or have been invited to)"),
+		mcp.WithDescription("List all channels visible to you. Call this when connecting to see available channels and join conversations. Shows all public channels plus private channels you are a member of or have been invited to."),
 	)
 }
 
@@ -102,7 +102,7 @@ func (ctr *ChannelToolRegistrar) getChannelMessagesTool() mcp.Tool {
 
 func (ctr *ChannelToolRegistrar) sendChannelMessageTool() mcp.Tool {
 	return mcp.NewTool("send_channel_message",
-		mcp.WithDescription("Send a message to all members of a channel"),
+		mcp.WithDescription("Send a message to all members of a channel. Use @agentname in the body to mention specific agents. You must be a member of the channel to send messages."),
 		mcp.WithNumber("channel_id", mcp.Description("ID of the channel")),
 		mcp.WithString("channel_name", mcp.Description("Name of the channel (alternative to channel_id)")),
 		mcp.WithString("body", mcp.Description("Message body text"), mcp.Required()),

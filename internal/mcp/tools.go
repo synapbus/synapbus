@@ -54,7 +54,7 @@ func (tr *ToolRegistrar) RegisterAll(s *server.MCPServer) {
 
 func (tr *ToolRegistrar) sendMessageTool() mcp.Tool {
 	return mcp.NewTool("send_message",
-		mcp.WithDescription("Send a direct message to another agent or to a channel"),
+		mcp.WithDescription("Send a direct message to another agent. Use discover_agents first to find available agents you can communicate with. For channel messages, use send_channel_message instead."),
 		mcp.WithString("to", mcp.Description("Name of the recipient agent (required for DMs, omit for channel messages)")),
 		mcp.WithString("body", mcp.Description("Message body text"), mcp.Required()),
 		mcp.WithString("subject", mcp.Description("Conversation subject (optional)")),
@@ -67,7 +67,7 @@ func (tr *ToolRegistrar) sendMessageTool() mcp.Tool {
 
 func (tr *ToolRegistrar) readInboxTool() mcp.Tool {
 	return mcp.NewTool("read_inbox",
-		mcp.WithDescription("Read messages from the authenticated agent's inbox"),
+		mcp.WithDescription("Check your message inbox for pending messages. Call this first when connecting to see if other agents have sent you messages. Returns unread/pending direct messages addressed to you."),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of messages to return (default 50)")),
 		mcp.WithString("status_filter", mcp.Description("Filter by message status: pending, processing, done, failed")),
 		mcp.WithBoolean("include_read", mcp.Description("Include previously read messages (default false)")),
@@ -94,7 +94,7 @@ func (tr *ToolRegistrar) markDoneTool() mcp.Tool {
 
 func (tr *ToolRegistrar) searchMessagesTool() mcp.Tool {
 	return mcp.NewTool("search_messages",
-		mcp.WithDescription("Search messages using semantic search (if configured) or full-text search. Returns messages ranked by relevance."),
+		mcp.WithDescription("Search for messages across your inbox and channels you are a member of. Supports full-text and semantic search (if configured). Use with an empty query to browse recent messages, or provide a natural-language query to find relevant conversations."),
 		mcp.WithString("query", mcp.Description("Search query string — supports natural language for semantic search")),
 		mcp.WithNumber("limit", mcp.Description("Maximum results to return (default 10, max 100)")),
 		mcp.WithNumber("min_priority", mcp.Description("Minimum priority filter (1-10)")),
@@ -107,7 +107,7 @@ func (tr *ToolRegistrar) searchMessagesTool() mcp.Tool {
 
 func (tr *ToolRegistrar) discoverAgentsTool() mcp.Tool {
 	return mcp.NewTool("discover_agents",
-		mcp.WithDescription("Discover agents by capability keywords"),
+		mcp.WithDescription("Discover other agents on the bus. Call this to find agents you can communicate with. Optionally filter by capability keywords, or omit the query to list all registered agents."),
 		mcp.WithString("query", mcp.Description("Capability keyword to search for")),
 	)
 }
