@@ -200,6 +200,27 @@
 			</div>
 		</div>
 
+		<!-- Webhook & K8s Management Links -->
+		<div class="card mb-5">
+			<div class="px-5 py-3 border-b border-border">
+				<h2 class="font-semibold text-sm text-text-primary font-display">Event Handlers</h2>
+			</div>
+			<div class="p-5 flex gap-3">
+				<a href="/agents/{agentName}/webhooks" class="btn-secondary text-xs inline-flex items-center gap-1.5">
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+					</svg>
+					Webhooks
+				</a>
+				<a href="/agents/{agentName}/k8s-handlers" class="btn-secondary text-xs inline-flex items-center gap-1.5">
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+					</svg>
+					K8s Handlers
+				</a>
+			</div>
+		</div>
+
 		<!-- Access Rights -->
 		<div class="card mb-5">
 			<div class="px-5 py-3 border-b border-border">

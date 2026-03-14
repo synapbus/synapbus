@@ -31,7 +31,7 @@ func TestNewMCPServerWithConsole(t *testing.T) {
 
 	con := console.New()
 
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, con)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, con, nil, nil)
 	if srv == nil {
 		t.Fatal("expected non-nil MCPServer")
 	}
@@ -56,7 +56,7 @@ func TestNewMCPServerNilConsole(t *testing.T) {
 	agentService := agents.NewAgentService(agentStore, tracer)
 
 	// nil console should not panic
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil)
 	if srv == nil {
 		t.Fatal("expected non-nil MCPServer")
 	}
@@ -126,7 +126,7 @@ func TestMCPToolCall_WithValidAPIKey(t *testing.T) {
 	agentService.Register(ctx, "receiver", "Receiver", "ai", nil, 1)
 
 	// Create MCP server
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil)
 
 	// Mount with auth middleware, just like main.go does
 	mux := http.NewServeMux()
@@ -180,7 +180,7 @@ func TestMCPToolCall_InvalidAPIKeyReturns401(t *testing.T) {
 	apiKeyStore := apikeys.NewSQLiteStore(db)
 	apiKeyService := apikeys.NewService(apiKeyStore)
 
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil)
 
 	mux := http.NewServeMux()
 	handler := agents.OptionalAuthMiddlewareWithAPIKeys(agentService, apiKeyService)(srv.Handler())

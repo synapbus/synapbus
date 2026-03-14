@@ -93,6 +93,8 @@ make lint           # Run linters
 ## Active Technologies
 - Go 1.23+ + ory/fosite (OAuth 2.1), mark3labs/mcp-go (MCP server), go-chi/chi (HTTP), Svelte 5 + Tailwind (Web UI) (002-mcp-auth-ux-polish)
 - modernc.org/sqlite (pure Go), TFMV/hnsw (vectors) (002-mcp-auth-ux-polish)
+- Go 1.25+ (from go.mod) + mark3labs/mcp-go (MCP tools), go-chi/chi (HTTP), golang.org/x/time/rate (rate limiting), k8s.io/client-go (K8s Jobs — optional) (003-webhooks-k8s-runner)
+- modernc.org/sqlite (pure Go), migration 009_webhooks.sql (003-webhooks-k8s-runner)
 
 ## Recent Changes
 - 002-mcp-auth-ux-polish: Added Go 1.23+ + ory/fosite (OAuth 2.1), mark3labs/mcp-go (MCP server), go-chi/chi (HTTP), Svelte 5 + Tailwind (Web UI)

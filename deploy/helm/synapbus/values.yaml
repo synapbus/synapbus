@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/smart-mcp-proxy/synapbus
+  repository: ghcr.io/synapbus/synapbus
   pullPolicy: IfNotPresent
   tag: "latest"
 

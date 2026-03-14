@@ -255,7 +255,7 @@
 					{/each}
 				<a
 					href="/dead-letters"
-					class="sidebar-item {isActive('/dead-letters') ? 'sidebar-item-active' : ''}"
+					class="sidebar-item {isActive('/dead-letters') && $page.url.pathname === '/dead-letters' ? 'sidebar-item-active' : ''}"
 				>
 					<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M21.75 9v.906a2.25 2.25 0 01-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 001.183 1.981l6.478 3.488m8.839 2.51l-4.66-2.51m0 0l-1.023-.55a2.25 2.25 0 00-2.134 0l-1.022.55m0 0l-4.661 2.51m16.5 1.615a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V8.844a2.25 2.25 0 011.183-1.98l7.5-4.04a2.25 2.25 0 012.134 0l7.5 4.04a2.25 2.25 0 011.183 1.98V19.5z" />
@@ -264,6 +264,15 @@
 					{#if deadLetterCount > 0}
 						<span class="ml-auto text-[10px] font-bold text-white bg-accent-red px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex-shrink-0">{deadLetterCount}</span>
 					{/if}
+				</a>
+				<a
+					href="/dead-letters/webhooks"
+					class="sidebar-item {isActive('/dead-letters/webhooks') ? 'sidebar-item-active' : ''}"
+				>
+					<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+					</svg>
+					Webhook Dead Letters
 				</a>
 				</div>
 			{/if}

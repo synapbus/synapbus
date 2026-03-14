@@ -14,9 +14,11 @@ import (
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
+	"github.com/synapbus/synapbus/internal/k8s"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/webhooks"
 )
 
 // MCPServer wraps the mcp-go server with SynapBus services.
@@ -38,6 +40,8 @@ func NewMCPServer(
 	attachmentService *attachments.Service,
 	searchService *search.Service,
 	consolePrinter *console.Printer,
+	webhookService *webhooks.WebhookService,
+	k8sService *k8s.K8sService,
 ) *MCPServer {
 	logger := slog.Default().With("component", "mcp-server")
 	connMgr := NewConnectionManager()
@@ -160,6 +164,12 @@ func NewMCPServer(
 	if attachmentService != nil {
 		attachmentRegistrar := NewAttachmentToolRegistrar(attachmentService)
 		attachmentRegistrar.RegisterAll(mcpSrv)
+	}
+
+	// Register webhook and K8s handler tools
+	if webhookService != nil || k8sService != nil {
+		webhookRegistrar := NewWebhookToolRegistrar(webhookService, k8sService)
+		webhookRegistrar.RegisterAll(mcpSrv)
 	}
 
 	// Create Streamable HTTP transport with context func for auth propagation
