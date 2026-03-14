@@ -1,4 +1,4 @@
-.PHONY: build test dev web clean lint hooks
+.PHONY: build test test-e2e dev web clean lint hooks
 
 BINARY := synapbus
 MODULE := github.com/synapbus/synapbus
@@ -13,6 +13,9 @@ build: web
 
 test:
 	CGO_ENABLED=$(CGO_ENABLED) go test ./... -v -count=1
+
+test-e2e:
+	CGO_ENABLED=$(CGO_ENABLED) go test ./tests/integration/... -v -count=1
 
 dev:
 	CGO_ENABLED=$(CGO_ENABLED) go run ./cmd/synapbus serve
