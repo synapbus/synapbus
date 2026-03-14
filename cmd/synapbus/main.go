@@ -31,7 +31,9 @@ import (
 	"github.com/synapbus/synapbus/internal/auth"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
+	"github.com/synapbus/synapbus/internal/dispatcher"
 	"github.com/synapbus/synapbus/internal/health"
+	k8spkg "github.com/synapbus/synapbus/internal/k8s"
 	mcpserver "github.com/synapbus/synapbus/internal/mcp"
 	"github.com/synapbus/synapbus/internal/messaging"
 	prommetrics "github.com/synapbus/synapbus/internal/metrics"
@@ -40,19 +42,21 @@ import (
 	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/web"
+	"github.com/synapbus/synapbus/internal/webhooks"
 )
 
 // version is set at build time via -ldflags "-X main.version=..."
 var version = "dev"
 
 var (
-	host           string
-	port           int
-	dataDir        string
-	logLevel       string
-	metricsEnabled bool
-	traceRetention string
-	adminSocketPath string
+	host              string
+	port              int
+	dataDir           string
+	logLevel          string
+	metricsEnabled    bool
+	traceRetention    string
+	adminSocketPath   string
+	webhookWorkers    int
 )
 
 func main() {
@@ -76,6 +80,7 @@ func main() {
 	serveCmd.Flags().BoolVar(&metricsEnabled, "metrics", false, "Enable Prometheus metrics endpoint at /metrics")
 	serveCmd.Flags().StringVar(&traceRetention, "trace-retention", "0", "Trace retention period (e.g. 30d, 90d, 0 for unlimited)")
 	serveCmd.Flags().StringVar(&adminSocketPath, "admin-socket", "", "Admin Unix socket path (default: {data}/synapbus.sock)")
+	serveCmd.Flags().IntVar(&webhookWorkers, "webhook-workers", 8, "Number of webhook delivery worker goroutines")
 
 	rootCmd.AddCommand(serveCmd)
 
@@ -144,6 +149,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	if as := os.Getenv("SYNAPBUS_ADMIN_SOCKET"); as != "" {
 		adminSocketPath = as
+	}
+	if ww := os.Getenv("SYNAPBUS_WEBHOOK_WORKERS"); ww != "" {
+		fmt.Sscanf(ww, "%d", &webhookWorkers)
 	}
 	if adminSocketPath == "" {
 		adminSocketPath = filepath.Join(dataDir, "synapbus.sock")
@@ -390,8 +398,36 @@ func runServe(cmd *cobra.Command, args []string) error {
 	apiKeyStore := apikeys.NewSQLiteStore(db.DB)
 	apiKeyService := apikeys.NewService(apiKeyStore)
 
-	// Create MCP server (with swarm + attachment + search tools)
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, con)
+	// Create webhook service
+	allowHTTPWebhooks := os.Getenv("SYNAPBUS_ALLOW_HTTP_WEBHOOKS") == "true"
+	allowPrivateNetworks := os.Getenv("SYNAPBUS_ALLOW_PRIVATE_NETWORKS") == "true"
+	webhookStore := webhooks.NewSQLiteWebhookStore(db.DB)
+	webhookService := webhooks.NewWebhookService(webhookStore, allowHTTPWebhooks, allowPrivateNetworks)
+	rateLimiter := webhooks.NewAgentRateLimiter(60) // 60 deliveries/minute per agent
+
+	// Create delivery engine (webhook dispatcher)
+	deliveryEngine := webhooks.NewDeliveryEngine(webhookService, rateLimiter, allowPrivateNetworks)
+	deliveryEngine.Start()
+	slog.Info("webhook delivery engine started")
+
+	// Create K8s job runner and service
+	k8sRunner := k8spkg.NewJobRunner(slog.Default())
+	k8sStore := k8spkg.NewSQLiteK8sStore(db.DB)
+	k8sService := k8spkg.NewK8sService(k8sStore, k8sRunner)
+	k8sDispatcher := k8spkg.NewK8sDispatcher(k8sStore, k8sRunner, slog.Default())
+
+	if k8sRunner.IsAvailable() {
+		slog.Info("K8s job runner available")
+	} else {
+		slog.Info("K8s job runner not available (not in-cluster)")
+	}
+
+	// Create event dispatcher (fans out to webhooks + K8s)
+	eventDispatcher := dispatcher.NewMultiDispatcher(slog.Default(), deliveryEngine, k8sDispatcher)
+	msgService.SetDispatcher(eventDispatcher)
+
+	// Create MCP server (with swarm + attachment + search + webhook + K8s tools)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, con, webhookService, k8sService)
 	startTime := time.Now()
 
 	// Start task expiry worker
@@ -538,6 +574,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Stop admin socket
 	adminServer.Stop()
+
+	// Stop webhook delivery engine
+	deliveryEngine.Stop()
 
 	// Stop expiry worker
 	expiryWorker.Stop()

@@ -125,6 +125,60 @@ export const deadLetters = {
 	count: () => request<{ count: number }>('GET', '/api/dead-letters/count')
 };
 
+// Webhooks
+export const webhooks = {
+	list: (agent?: string) => {
+		const qs = agent ? `?agent=${encodeURIComponent(agent)}` : '';
+		return request<{ webhooks: any[]; count: number }>('GET', `/api/webhooks${qs}`);
+	},
+	enable: (id: number) =>
+		request<{ status: string }>('POST', `/api/webhooks/${id}/enable`),
+	disable: (id: number) =>
+		request<{ status: string }>('POST', `/api/webhooks/${id}/disable`),
+	deliveries: (webhookId: number, opts?: { status?: string; limit?: number }) => {
+		const qs = new URLSearchParams();
+		if (opts?.status) qs.set('status', opts.status);
+		if (opts?.limit) qs.set('limit', String(opts.limit));
+		const q = qs.toString();
+		return request<{ deliveries: any[]; count: number }>('GET', `/api/webhooks/${webhookId}/deliveries${q ? '?' + q : ''}`);
+	}
+};
+
+// Webhook Deliveries
+export const webhookDeliveries = {
+	deadLetters: (opts?: { agent?: string; limit?: number }) => {
+		const qs = new URLSearchParams();
+		if (opts?.agent) qs.set('agent', opts.agent);
+		if (opts?.limit) qs.set('limit', String(opts.limit));
+		const q = qs.toString();
+		return request<{ deliveries: any[]; count: number }>('GET', `/api/deliveries/dead-letters${q ? '?' + q : ''}`);
+	},
+	retry: (id: number) =>
+		request<{ status: string }>('POST', `/api/deliveries/${id}/retry`)
+};
+
+// K8s Handlers
+export const k8sHandlers = {
+	list: (agent?: string) => {
+		const qs = agent ? `?agent=${encodeURIComponent(agent)}` : '';
+		return request<{ handlers: any[]; count: number; k8s_available: boolean }>('GET', `/api/k8s/handlers${qs}`);
+	}
+};
+
+// K8s Job Runs
+export const k8sJobRuns = {
+	list: (opts?: { agent?: string; status?: string; limit?: number }) => {
+		const qs = new URLSearchParams();
+		if (opts?.agent) qs.set('agent', opts.agent);
+		if (opts?.status) qs.set('status', opts.status);
+		if (opts?.limit) qs.set('limit', String(opts.limit));
+		const q = qs.toString();
+		return request<{ job_runs: any[]; count: number }>('GET', `/api/k8s/job-runs${q ? '?' + q : ''}`);
+	},
+	logs: (id: number) =>
+		request<{ logs: string }>('GET', `/api/k8s/job-runs/${id}/logs`)
+};
+
 // API Keys
 export const apiKeys = {
 	list: () => request<{ keys: any[] }>('GET', '/api/keys'),

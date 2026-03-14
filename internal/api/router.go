@@ -9,8 +9,10 @@ import (
 	"github.com/synapbus/synapbus/internal/apikeys"
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/k8s"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/webhooks"
 )
 
 // RouterConfig holds optional services for the API router.
@@ -24,6 +26,10 @@ type RouterConfig struct {
 	ChannelService    *channels.Service
 	APIKeyService     *apikeys.Service
 	DeadLetterStore   *messaging.DeadLetterStore
+	WebhookService    *webhooks.WebhookService
+	WebhookStore      webhooks.WebhookStore
+	K8sService        *k8s.K8sService
+	K8sStore          k8s.K8sStore
 	SSEHub            *SSEHub
 	SessionMiddleware func(http.Handler) http.Handler
 }
@@ -150,6 +156,31 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 				r.Get("/api/dead-letters", deadLettersHandler.List)
 				r.Get("/api/dead-letters/count", deadLettersHandler.Count)
 				r.Post("/api/dead-letters/{id}/acknowledge", deadLettersHandler.Acknowledge)
+			})
+		}
+
+		// Webhooks
+		if cfg.WebhookService != nil && cfg.WebhookStore != nil {
+			webhooksHandler := NewWebhooksHandler(cfg.WebhookService, cfg.WebhookStore, cfg.AgentService)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware)
+
+				r.Get("/api/webhooks", webhooksHandler.ListWebhooks)
+				r.Get("/api/webhooks/{id}/deliveries", webhooksHandler.WebhookDeliveries)
+				r.Get("/api/deliveries/dead-letters", webhooksHandler.DeadLetters)
+				r.Post("/api/deliveries/{id}/retry", webhooksHandler.RetryDelivery)
+			})
+		}
+
+		// K8s Handlers
+		if cfg.K8sService != nil && cfg.K8sStore != nil {
+			k8sHandler := NewK8sHandler(cfg.K8sService, cfg.K8sStore, cfg.AgentService)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware)
+
+				r.Get("/api/k8s/handlers", k8sHandler.ListHandlers)
+				r.Get("/api/k8s/job-runs", k8sHandler.ListJobRuns)
+				r.Get("/api/k8s/job-runs/{id}/logs", k8sHandler.JobRunLogs)
 			})
 		}
 	}

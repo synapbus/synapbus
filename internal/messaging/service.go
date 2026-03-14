@@ -8,14 +8,16 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/synapbus/synapbus/internal/dispatcher"
 	"github.com/synapbus/synapbus/internal/trace"
 )
 
 // MessagingService provides business logic for messaging operations.
 type MessagingService struct {
-	store  MessageStore
-	tracer *trace.Tracer
-	logger *slog.Logger
+	store      MessageStore
+	tracer     *trace.Tracer
+	dispatcher dispatcher.EventDispatcher
+	logger     *slog.Logger
 }
 
 // NewMessagingService creates a new messaging service.
@@ -25,6 +27,11 @@ func NewMessagingService(store MessageStore, tracer *trace.Tracer) *MessagingSer
 		tracer: tracer,
 		logger: slog.Default().With("component", "messaging"),
 	}
+}
+
+// SetDispatcher sets the event dispatcher for webhook/K8s delivery.
+func (s *MessagingService) SetDispatcher(d dispatcher.EventDispatcher) {
+	s.dispatcher = d
 }
 
 // SendMessage creates a message, auto-creating conversations as needed.
@@ -130,6 +137,39 @@ func (s *MessagingService) SendMessage(ctx context.Context, from, to, body strin
 			"to":              to,
 			"priority":        priority,
 		})
+	}
+
+	// Dispatch event to webhooks/K8s (async, best-effort)
+	if s.dispatcher != nil {
+		eventType := "message.received"
+		channel := ""
+		if opts.ChannelID != nil {
+			eventType = "channel.message"
+			channel = fmt.Sprintf("%d", *opts.ChannelID)
+		}
+
+		event := dispatcher.MessageEvent{
+			EventType: eventType,
+			MessageID: msg.ID,
+			FromAgent: from,
+			ToAgent:   to,
+			Channel:   channel,
+			Body:      body,
+			Priority:  priority,
+			Metadata:  string(metadata),
+		}
+
+		// Extract @mentions for mention webhook events
+		event.MentionedAgents = dispatcher.ExtractMentions(body)
+
+		go func() {
+			if err := s.dispatcher.Dispatch(context.Background(), event); err != nil {
+				s.logger.Error("event dispatch failed",
+					"message_id", msg.ID,
+					"error", err,
+				)
+			}
+		}()
 	}
 
 	return msg, nil

@@ -44,6 +44,6 @@
 
 ## R8: Docker Image Registry
 
-**Decision**: ghcr.io/smart-mcp-proxy/synapbus
+**Decision**: ghcr.io/synapbus/synapbus
 **Rationale**: GitHub Container Registry is free for public repos, integrates with GitHub Actions natively (GITHUB_TOKEN auth).
 **Alternatives considered**: Docker Hub (rate limits), ECR (AWS-specific)

@@ -12,6 +12,7 @@ vendor/
 
 # Data directory
 data/
+data-*/
 
 # Node / Svelte
 web/node_modules/
