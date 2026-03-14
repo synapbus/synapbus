@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { agents as agentsApi } from '$lib/api/client';
+	import { user } from '$lib/stores/auth';
 	import AgentCard from '$lib/components/AgentCard.svelte';
 
 	let agentList = $state<any[]>([]);
@@ -8,7 +9,7 @@
 
 	let newName = $state('');
 	let newDisplayName = $state('');
-	let newType = $state('ai');
+	let newType = 'ai'; // agents are always AI; human accounts created via CLI
 	let registering = $state(false);
 	let registerError = $state('');
 	let newApiKey = $state('');
@@ -172,13 +173,6 @@
 						<label for="agent-display" class="block text-xs font-medium text-text-secondary mb-1">Display name <span class="text-text-secondary">(optional)</span></label>
 						<input id="agent-display" type="text" class="input" placeholder="e.g. Research Agent" bind:value={newDisplayName} />
 					</div>
-					<div>
-						<label for="agent-type" class="block text-xs font-medium text-text-secondary mb-1">Type</label>
-						<select id="agent-type" class="input" bind:value={newType}>
-							<option value="ai">AI Agent</option>
-							<option value="human">Human Agent</option>
-						</select>
-					</div>
 					<button type="submit" class="btn-primary w-full" disabled={registering || !newName.trim()}>
 						{registering ? 'Registering...' : 'Register Agent'}
 					</button>
@@ -209,7 +203,7 @@
 	{:else}
 		<div class="grid gap-3 sm:grid-cols-2">
 			{#each agentList as agent (agent.id)}
-				<AgentCard {agent} />
+				<AgentCard {agent} ownerName={$user?.display_name || $user?.username} />
 			{/each}
 		</div>
 	{/if}

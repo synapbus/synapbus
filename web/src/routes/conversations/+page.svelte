@@ -86,12 +86,16 @@
 				{#each convList as conv}
 					<a href="/conversations/{conv.id}" class="block px-5 py-3 hover:bg-bg-tertiary/50 transition-colors">
 						<div class="flex items-center justify-between">
-							<div class="min-w-0">
-								<p class="font-medium text-sm text-text-primary truncate">
-									{conv.subject || 'Untitled'}
-								</p>
-								<p class="text-xs text-text-secondary truncate mt-0.5">
-									{conv.last_agent}: {conv.last_message}
+							<div class="min-w-0 flex-1">
+								<div class="flex items-center gap-2 mb-0.5">
+									{#if conv.last_agent}
+										<span class="font-semibold text-sm text-text-primary">{conv.last_agent}</span>
+										<span class="text-[10px] text-text-secondary">&middot;</span>
+									{/if}
+									<span class="text-xs text-text-secondary">{conv.updated_at ? new Date(conv.updated_at).toLocaleString() : ''}</span>
+								</div>
+								<p class="text-sm text-text-primary/80 truncate">
+									{conv.last_message ? (conv.last_message.length > 120 ? conv.last_message.slice(0, 120) + '...' : conv.last_message) : 'No messages'}
 								</p>
 							</div>
 							<span class="badge bg-bg-tertiary text-text-secondary flex-shrink-0 ml-3">

@@ -98,6 +98,7 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Get("/api/agents", agentsHandler.ListAgents)
 			r.Get("/api/agents/{name}", agentsHandler.GetAgent)
 			r.Post("/api/agents", agentsHandler.RegisterAgent)
+			r.Put("/api/agents/{name}", agentsHandler.UpdateAgent)
 			r.Delete("/api/agents/{name}", agentsHandler.DeleteAgent)
 			r.Post("/api/agents/{name}/revoke-key", agentsHandler.RevokeKey)
 			r.Get("/api/agents/{name}/messages", messagesHandler.DMMessages)

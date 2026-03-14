@@ -8,7 +8,7 @@
 		created_at: string;
 	};
 
-	let { agent }: { agent: Agent } = $props();
+	let { agent, ownerName }: { agent: Agent; ownerName?: string | null } = $props();
 </script>
 
 <a href="/agents/{agent.name}" class="card p-4 block hover:border-border-active transition-all group">
@@ -21,6 +21,9 @@
 				<h3 class="font-semibold text-sm text-text-primary">{agent.display_name || agent.name}</h3>
 				{#if agent.display_name}
 					<p class="text-xs text-text-secondary font-mono">@{agent.name}</p>
+				{/if}
+				{#if ownerName}
+					<p class="text-[10px] text-text-secondary mt-0.5">Owner: {ownerName}</p>
 				{/if}
 			</div>
 		</div>

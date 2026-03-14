@@ -3,7 +3,8 @@
 BINARY := synapbus
 MODULE := github.com/synapbus/synapbus
 BUILD_DIR := bin
-LDFLAGS := -s -w
+VERSION ?= dev
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
 CGO_ENABLED := 0
 

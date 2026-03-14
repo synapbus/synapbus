@@ -91,7 +91,9 @@
 								<span class="text-sm text-text-secondary">{msg.to_agent}</span>
 							{/if}
 							<span class="text-xs text-text-secondary">{formatTime(msg.created_at)}</span>
+							{#if msg.status !== 'done'}
 							<span class="{statusClass(msg.status)}">{msg.status}</span>
+						{/if}
 							{#if msg.priority >= 8}
 								<span class="badge bg-accent-red/20 text-accent-red">P{msg.priority}</span>
 							{:else if msg.priority >= 5}

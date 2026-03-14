@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { channels as channelsApi, messages as messagesApi, agents as agentsApi } from '$lib/api/client';
+	import { openThread, closeThread } from '$lib/stores/thread';
 
 	let channel = $state<any>(null);
 	let members = $state<any[]>([]);
@@ -10,11 +11,13 @@
 	let joinError = $state('');
 	let joining = $state(false);
 	let showInfo = $state(false);
+	let leaveError = $state('');
 
 	// Compose state
 	let body = $state('');
 	let sending = $state(false);
 	let sendError = $state('');
+	let selectedAgent = $state<any>(null);
 
 	let channelName = $derived($page.params.name);
 
@@ -30,6 +33,9 @@
 			channel = chRes.channel;
 			members = chRes.members;
 			agentList = agRes.agents ?? [];
+			if (agentList.length > 0 && !selectedAgent) {
+				selectedAgent = agentList[0];
+			}
 			await loadMessages();
 		} catch {
 			// handled
@@ -57,13 +63,30 @@
 		});
 	}
 
-	let _initialized = $state(false);
+	let _prevChannel = $state('');
 	$effect(() => {
-		if (!_initialized) {
-			_initialized = true;
+		if (channelName !== _prevChannel) {
+			_prevChannel = channelName;
+			closeThread();
 			loadChannel();
 		}
 	});
+
+	async function handleLeave() {
+		leaveError = '';
+		try {
+			// Leave all owned agents from the channel
+			const memberAgents = members
+				.filter(m => agentList.some(a => a.name === m.agent_name))
+				.map(m => m.agent_name);
+			for (const agentName of memberAgents) {
+				await channelsApi.leave(channelName, agentName);
+			}
+			await loadChannel();
+		} catch (err: any) {
+			leaveError = err.message || 'Failed to leave channel';
+		}
+	}
 
 	async function handleJoin() {
 		joining = true;
@@ -79,12 +102,12 @@
 	}
 
 	async function handleSend() {
-		if (!body.trim() || !agentList.length) return;
+		if (!body.trim() || !selectedAgent) return;
 		sending = true;
 		sendError = '';
 		try {
 			await messagesApi.send({
-				from: agentList[0].name,
+				from: selectedAgent.name,
 				body: body.trim(),
 				channel_id: channel.id
 			});
@@ -190,7 +213,7 @@
 					{:else}
 						<div class="py-2">
 							{#each messageList as msg (msg.id)}
-								<div class="group px-5 py-2 hover:bg-bg-tertiary/40 transition-colors">
+								<div class="group px-5 py-2 hover:bg-bg-tertiary/40 transition-colors relative">
 									<div class="flex gap-3">
 										<div class="w-9 h-9 rounded-lg {agentColor(msg.from_agent)} flex items-center justify-center text-sm font-bold text-white flex-shrink-0 mt-0.5">
 											{msg.from_agent.charAt(0).toUpperCase()}
@@ -201,7 +224,28 @@
 												<span class="text-xs text-text-secondary">{formatTime(msg.created_at)}</span>
 											</div>
 											<p class="text-sm text-text-primary/90 leading-relaxed whitespace-pre-wrap">{msg.body}</p>
+											{#if msg.reply_count > 0}
+												<button
+													class="mt-1 flex items-center gap-1 text-xs text-accent-blue hover:underline"
+													onclick={() => openThread(msg.id, msg.conversation_id)}
+												>
+													<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+														<path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+													</svg>
+													{msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
+												</button>
+											{/if}
 										</div>
+										<!-- Reply button (visible on hover) -->
+										<button
+											class="absolute top-1.5 right-3 p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+											title="Reply in thread"
+											onclick={() => openThread(msg.id, msg.conversation_id)}
+										>
+											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+												<path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+											</svg>
+										</button>
 									</div>
 								</div>
 							{/each}
@@ -210,7 +254,7 @@
 				</div>
 
 				<!-- Compose bar -->
-				{#if isMember || !channel?.is_private}
+				{#if isMember}
 					<div class="px-4 pb-4 pt-2 flex-shrink-0">
 						{#if sendError}
 							<div class="mb-2 px-3 py-1.5 bg-accent-red/10 rounded text-xs text-accent-red">{sendError}</div>
@@ -238,8 +282,34 @@
 									</svg>
 								</button>
 							</div>
-							<p class="text-[10px] text-text-secondary mt-1 px-1">Sending as <span class="font-mono">{agentList[0]?.name}</span></p>
+							<div class="flex items-center gap-2 mt-1 px-1">
+								<p class="text-[10px] text-text-secondary">Sending as <span class="font-mono">{selectedAgent?.display_name || selectedAgent?.name}</span></p>
+								{#if agentList.length > 1}
+									<select
+										class="text-[10px] bg-bg-tertiary border border-border rounded px-1 py-0.5 text-text-secondary outline-none"
+										onchange={(e) => {
+											const target = e.target as HTMLSelectElement;
+											selectedAgent = agentList.find(a => a.name === target.value) ?? agentList[0];
+										}}
+									>
+										{#each agentList as agent}
+											<option value={agent.name} selected={agent.name === selectedAgent?.name}>
+												{agent.display_name || agent.name}
+											</option>
+										{/each}
+									</select>
+								{/if}
+							</div>
 						{/if}
+					</div>
+				{:else}
+					<div class="px-4 pb-4 pt-2 flex-shrink-0">
+						<div class="flex items-center justify-center gap-3 px-4 py-3 bg-bg-tertiary rounded-lg border border-border">
+							<p class="text-sm text-text-secondary">Join this channel to participate</p>
+							<button class="btn-primary text-xs" onclick={handleJoin} disabled={joining}>
+								{joining ? 'Joining...' : 'Join Channel'}
+							</button>
+						</div>
 					</div>
 				{/if}
 			{/if}
@@ -288,8 +358,11 @@
 											{member.agent_name.charAt(0).toUpperCase()}
 										</span>
 										<span class="text-xs text-text-primary truncate">{member.agent_name}</span>
+										{#if agentList.some(a => a.name === member.agent_name)}
+											<span class="text-[9px] text-accent-green ml-auto">(you)</span>
+										{/if}
 										{#if member.role === 'owner'}
-											<span class="text-[9px] text-accent-yellow ml-auto">owner</span>
+											<span class="text-[9px] text-accent-yellow {agentList.some(a => a.name === member.agent_name) ? '' : 'ml-auto'}">owner</span>
 										{/if}
 									</div>
 								{/each}
@@ -298,12 +371,15 @@
 					</div>
 
 					<div class="border-t border-border pt-3 mt-3 space-y-2">
+						{#if leaveError}
+							<div class="px-2 py-1.5 bg-accent-red/10 rounded text-[11px] text-accent-red">{leaveError}</div>
+						{/if}
 						{#if !isMember}
 							<button class="btn-primary text-xs w-full" onclick={handleJoin} disabled={joining}>
 								{joining ? 'Joining...' : 'Join Channel'}
 							</button>
 						{:else}
-							<button class="btn-secondary text-xs w-full" onclick={async () => { await channelsApi.leave(channelName); await loadChannel(); }}>
+							<button class="btn-secondary text-xs w-full" onclick={handleLeave}>
 								Leave Channel
 							</button>
 						{/if}

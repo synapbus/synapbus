@@ -92,14 +92,14 @@
 						<div class="flex items-center justify-between">
 							<div class="min-w-0">
 								<p class="font-medium text-sm text-text-primary truncate">
-									{conv.subject || 'Untitled conversation'}
+									{conv.last_agent}
 								</p>
 								<p class="text-xs text-text-secondary truncate mt-0.5">
-									{conv.last_agent}: {conv.last_message}
+									{conv.last_message}
 								</p>
 							</div>
 							<div class="flex items-center gap-2 flex-shrink-0 ml-3">
-								<span class="badge bg-bg-tertiary text-text-secondary">{conv.message_count} msgs</span>
+								<span class="badge bg-bg-tertiary text-text-secondary">{conv.message_count} {conv.message_count === 1 ? 'msg' : 'msgs'}</span>
 							</div>
 						</div>
 					</a>

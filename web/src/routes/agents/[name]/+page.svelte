@@ -12,6 +12,14 @@
 	let deleting = $state(false);
 	let confirmDelete = $state(false);
 
+	// Access Rights state
+	let allowedChannels = $state('');
+	let readOnly = $state(false);
+	let maxRate = $state(60);
+	let savingAccess = $state(false);
+	let accessSaved = $state(false);
+	let accessError = $state('');
+
 	let agentName = $derived($page.params.name);
 
 	async function loadAgent() {
@@ -20,6 +28,11 @@
 			const res = await agentsApi.get(agentName);
 			agent = res.agent;
 			traces = res.traces;
+			// Populate access rights from capabilities
+			const caps = agent.capabilities || {};
+			allowedChannels = (caps.allowed_channels || []).join(', ');
+			readOnly = caps.read_only ?? false;
+			maxRate = caps.max_rate ?? 60;
 		} catch {
 			// handled
 		} finally {
@@ -59,6 +72,32 @@
 		} finally {
 			deleting = false;
 			confirmDelete = false;
+		}
+	}
+
+	async function handleSaveAccess() {
+		savingAccess = true;
+		accessError = '';
+		accessSaved = false;
+		try {
+			const channels = allowedChannels
+				.split(',')
+				.map(s => s.trim())
+				.filter(s => s.length > 0);
+			const capabilities = {
+				...(agent.capabilities || {}),
+				allowed_channels: channels,
+				read_only: readOnly,
+				max_rate: maxRate
+			};
+			const res = await agentsApi.update(agentName, { capabilities });
+			agent = res.agent;
+			accessSaved = true;
+			setTimeout(() => (accessSaved = false), 3000);
+		} catch (err: any) {
+			accessError = err.message || 'Failed to save access rights';
+		} finally {
+			savingAccess = false;
 		}
 	}
 </script>
@@ -153,6 +192,65 @@
 						<button class="btn-secondary text-xs" onclick={() => (confirmDelete = false)}>Cancel</button>
 					{/if}
 				</div>
+			</div>
+		</div>
+
+		<!-- Access Rights -->
+		<div class="card mb-5">
+			<div class="px-5 py-3 border-b border-border">
+				<h2 class="font-semibold text-sm text-text-primary font-display">Access Rights</h2>
+			</div>
+			<div class="p-5 space-y-4">
+				{#if accessError}
+					<div class="px-3 py-2 bg-accent-red/10 rounded text-xs text-accent-red">{accessError}</div>
+				{/if}
+				{#if accessSaved}
+					<div class="px-3 py-2 bg-accent-green/10 rounded text-xs text-accent-green">Access rights saved successfully.</div>
+				{/if}
+
+				<div>
+					<label for="allowed-channels" class="block text-xs font-medium text-text-secondary mb-1">Allowed Channels</label>
+					<input
+						id="allowed-channels"
+						type="text"
+						class="input"
+						placeholder="e.g. general, project-alpha"
+						bind:value={allowedChannels}
+					/>
+					<p class="text-[10px] text-text-secondary mt-1">Comma-separated list of channel names this agent can access. Leave empty for all channels.</p>
+				</div>
+
+				<div class="flex items-center gap-3">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							class="w-4 h-4 rounded border-border bg-bg-tertiary text-accent-blue focus:ring-accent-blue"
+							bind:checked={readOnly}
+						/>
+						<span class="text-sm text-text-primary">Read-only mode</span>
+					</label>
+					<p class="text-[10px] text-text-secondary">Agent can read messages but cannot send.</p>
+				</div>
+
+				<div>
+					<label for="max-rate" class="block text-xs font-medium text-text-secondary mb-1">Max Message Rate (per minute)</label>
+					<input
+						id="max-rate"
+						type="number"
+						class="input w-32"
+						min="1"
+						max="1000"
+						bind:value={maxRate}
+					/>
+				</div>
+
+				<button
+					class="btn-primary text-xs"
+					onclick={handleSaveAccess}
+					disabled={savingAccess}
+				>
+					{savingAccess ? 'Saving...' : 'Save Access Rights'}
+				</button>
 			</div>
 		</div>
 

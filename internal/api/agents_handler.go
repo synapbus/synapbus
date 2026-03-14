@@ -123,6 +123,47 @@ func (h *AgentsHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// UpdateAgent handles PUT /api/agents/{name}.
+func (h *AgentsHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := OwnerIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody("unauthorized", "Authentication required"))
+		return
+	}
+
+	name := chi.URLParam(r, "name")
+
+	// Verify ownership
+	agent, err := h.agentService.GetAgent(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, errorBody("not_found", "Agent not found"))
+		return
+	}
+	if agent.OwnerID != ownerID {
+		writeJSON(w, http.StatusForbidden, errorBody("forbidden", "You do not have access to this agent"))
+		return
+	}
+
+	var req struct {
+		DisplayName  string          `json:"display_name"`
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody("invalid_request", "Invalid JSON body"))
+		return
+	}
+
+	updated, err := h.agentService.UpdateAgent(r.Context(), name, req.DisplayName, req.Capabilities)
+	if err != nil {
+		h.logger.Error("update agent failed", "error", err)
+		writeJSON(w, http.StatusBadRequest, errorBody("update_failed", err.Error()))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"agent": updated})
+}
+
 // DeleteAgent handles DELETE /api/agents/{name}.
 func (h *AgentsHandler) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 	ownerID, ok := OwnerIDFromContext(r.Context())

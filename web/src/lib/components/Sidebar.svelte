@@ -199,6 +199,7 @@
 									></span>
 								</span>
 								<span class="truncate">{agent.display_name || agent.name}</span>
+								<span class="text-[9px] text-text-secondary flex-shrink-0">(you)</span>
 								{#if agent.type === 'ai'}
 									<span class="ml-auto text-[9px] font-mono text-accent-purple bg-accent-purple/10 px-1 rounded flex-shrink-0">AI</span>
 								{/if}

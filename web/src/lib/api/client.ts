@@ -62,7 +62,7 @@ export const messages = {
 		return request<{ messages: any[]; total: number }>('GET', `/api/messages${q ? '?' + q : ''}`);
 	},
 	get: (id: number) => request<any>('GET', `/api/messages/${id}`),
-	send: (body: { from?: string; to?: string; body: string; priority?: number; subject?: string; channel_id?: number }) =>
+	send: (body: { from?: string; to?: string; body: string; priority?: number; subject?: string; channel_id?: number; reply_to?: number }) =>
 		request<any>('POST', '/api/messages', body),
 	markDone: (id: number) => request<{ status: string }>('POST', `/api/messages/${id}/done`),
 	search: (q: string, limit?: number) => {
@@ -84,6 +84,8 @@ export const agents = {
 	get: (name: string) => request<{ agent: any; traces: any[] }>('GET', `/api/agents/${encodeURIComponent(name)}`),
 	register: (body: { name: string; display_name?: string; type?: string; capabilities?: object }) =>
 		request<{ agent: any; api_key: string }>('POST', '/api/agents', body),
+	update: (name: string, body: { display_name?: string; capabilities?: object }) =>
+		request<{ agent: any }>('PUT', `/api/agents/${encodeURIComponent(name)}`, body),
 	delete: (name: string) => request<{ status: string }>('DELETE', `/api/agents/${encodeURIComponent(name)}`),
 	revokeKey: (name: string) =>
 		request<{ agent: any; api_key: string }>('POST', `/api/agents/${encodeURIComponent(name)}/revoke-key`),

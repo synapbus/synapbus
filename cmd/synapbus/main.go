@@ -38,6 +38,9 @@ import (
 	"github.com/synapbus/synapbus/internal/web"
 )
 
+// version is set at build time via -ldflags "-X main.version=..."
+var version = "dev"
+
 var (
 	host           string
 	port           int
@@ -50,9 +53,10 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "synapbus",
-		Short: "SynapBus — MCP-native agent-to-agent messaging",
-		Long:  "Local-first, MCP-native messaging service for AI agents. Single binary with embedded storage, semantic search, and a Slack-like Web UI.",
+		Use:     "synapbus",
+		Short:   "SynapBus — MCP-native agent-to-agent messaging",
+		Long:    "Local-first, MCP-native messaging service for AI agents. Single binary with embedded storage, semantic search, and a Slack-like Web UI.",
+		Version: version,
 	}
 
 	serveCmd := &cobra.Command{
@@ -378,7 +382,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	slog.Info("task expiry worker started")
 
 	// Create health checker
-	healthChecker := health.NewChecker(db.DB, "0.1.0")
+	healthChecker := health.NewChecker(db.DB, version)
 
 	// Set up chi router
 	r := chi.NewRouter()
@@ -390,7 +394,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Health endpoint (no auth)
-	r.Get("/health", mcpserver.NewHealthHandler(mcpSrv.ConnectionManager(), "0.1.0", startTime))
+	r.Get("/health", mcpserver.NewHealthHandler(mcpSrv.ConnectionManager(), version, startTime))
 
 	// Kubernetes-style health probes (no auth, always registered)
 	r.Get("/healthz", healthChecker.Healthz)

@@ -123,7 +123,7 @@
 						{conversation.subject || 'Conversation #' + conversation.id}
 					</h1>
 					<p class="text-[11px] text-text-secondary">
-						Started by {conversation.created_by} -- {messagesList.length} messages
+						Started by {conversation.created_by} — {messagesList.length} {messagesList.length === 1 ? 'message' : 'messages'}
 					</p>
 				</div>
 			</div>
@@ -146,7 +146,9 @@
 									</svg>
 									<span class="text-xs text-text-secondary">{msg.to_agent}</span>
 								{/if}
+								{#if msg.status !== 'done'}
 								<span class="{statusBadge(msg.status)}">{msg.status}</span>
+							{/if}
 								<span class="text-xs text-text-secondary ml-auto">{formatTime(msg.created_at)}</span>
 							</div>
 							<div class="text-sm text-text-primary/90 whitespace-pre-wrap leading-relaxed">{msg.body}</div>
