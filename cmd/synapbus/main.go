@@ -423,6 +423,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		r.Handle("/metrics", promhttp.Handler())
 	}
 
+	// Kubernetes-style health probes (no auth, always registered)
+	r.Get("/healthz", healthChecker.Healthz)
+	r.Get("/readyz", healthChecker.Readyz)
+
+	// Prometheus metrics endpoint (only when enabled)
+	if metricsEnabled {
+		r.Handle("/metrics", promhttp.Handler())
+	}
+
 	// Auth endpoints (public)
 	r.Post("/auth/register", withHumanAgent(authHandlers.HandleRegister, userStore, agentService, channelService))
 	r.Post("/auth/login", withHumanAgent(authHandlers.HandleLogin, userStore, agentService, channelService))

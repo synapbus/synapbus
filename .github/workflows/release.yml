@@ -22,14 +22,19 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
+            suffix: ""
           - goos: linux
             goarch: arm64
+            suffix: ""
           - goos: darwin
             goarch: amd64
+            suffix: ""
           - goos: darwin
             goarch: arm64
+            suffix: ""
           - goos: windows
             goarch: amd64
+            suffix: ".exe"
     steps:
       - uses: actions/checkout@v4
 
@@ -62,13 +67,9 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          SUFFIX=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            SUFFIX=".exe"
-          fi
           go build \
             -ldflags "-s -w -X main.version=${{ steps.version.outputs.VERSION }}" \
-            -o "synapbus${SUFFIX}" \
+            -o "synapbus${{ matrix.suffix }}" \
             ./cmd/synapbus/
 
       - name: Create archive
