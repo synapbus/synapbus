@@ -32,9 +32,6 @@ jobs:
           - goos: darwin
             goarch: arm64
             suffix: ""
-          - goos: windows
-            goarch: amd64
-            suffix: ".exe"
     steps:
       - uses: actions/checkout@v4
 
@@ -75,24 +72,12 @@ jobs:
       - name: Create archive
         run: |
           ARCHIVE_NAME="synapbus-${{ matrix.goos }}-${{ matrix.goarch }}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${ARCHIVE_NAME}.zip" synapbus.exe
-          else
-            tar czf "${ARCHIVE_NAME}.tar.gz" synapbus
-          fi
+          tar czf "${ARCHIVE_NAME}.tar.gz" synapbus
 
       - uses: actions/upload-artifact@v4
         with:
           name: synapbus-${{ matrix.goos }}-${{ matrix.goarch }}
           path: synapbus-*.tar.gz
-          if-no-files-found: ignore
-
-      - uses: actions/upload-artifact@v4
-        if: matrix.goos == 'windows'
-        with:
-          name: synapbus-${{ matrix.goos }}-${{ matrix.goarch }}-zip
-          path: synapbus-*.zip
-          if-no-files-found: ignore
 
   homebrew:
     name: Generate Homebrew Formula
@@ -188,7 +173,6 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/synapbus-*.tar.gz
-            artifacts/synapbus-*.zip
             artifacts/synapbus.rb
 
   docker:
