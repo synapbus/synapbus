@@ -23,6 +23,8 @@ type MessageStore interface {
 	GetConversation(ctx context.Context, id int64) (*Conversation, error)
 	GetConversationMessages(ctx context.Context, conversationID int64) ([]*Message, error)
 	GetReplies(ctx context.Context, messageID int64) ([]*Message, error)
+	GetChannelMessages(ctx context.Context, channelID int64, limit int) ([]*Message, error)
+	GetDMMessages(ctx context.Context, agents []string, peerAgent string, limit int) ([]*Message, error)
 	AgentExists(ctx context.Context, agentName string) (bool, error)
 }
 
@@ -440,6 +442,69 @@ func (s *SQLiteMessageStore) GetReplies(ctx context.Context, messageID int64) ([
 	}
 	defer rows.Close()
 
+	return scanMessages(rows)
+}
+
+func (s *SQLiteMessageStore) GetChannelMessages(ctx context.Context, channelID int64, limit int) ([]*Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, conversation_id, from_agent, to_agent, channel_id,
+		        body, priority, status, metadata, claimed_by, claimed_at,
+		        created_at, updated_at, reply_to
+		 FROM messages WHERE channel_id = ?
+		 ORDER BY created_at ASC
+		 LIMIT ?`, channelID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get channel messages: %w", err)
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
+func (s *SQLiteMessageStore) GetDMMessages(ctx context.Context, agents []string, peerAgent string, limit int) ([]*Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if len(agents) == 0 {
+		return []*Message{}, nil
+	}
+
+	// Build placeholders for owned agents
+	placeholders := make([]string, len(agents))
+	args := make([]any, 0, len(agents)*2+2)
+	for i, a := range agents {
+		placeholders[i] = "?"
+		args = append(args, a)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	// Messages where (from_agent IN owned AND to_agent = peer) OR (from_agent = peer AND to_agent IN owned)
+	// and channel_id IS NULL (DMs only)
+	query := fmt.Sprintf(
+		`SELECT id, conversation_id, from_agent, to_agent, channel_id,
+		        body, priority, status, metadata, claimed_by, claimed_at,
+		        created_at, updated_at, reply_to
+		 FROM messages
+		 WHERE channel_id IS NULL
+		   AND ((from_agent IN (%s) AND to_agent = ?) OR (from_agent = ? AND to_agent IN (%s)))
+		 ORDER BY created_at ASC
+		 LIMIT ?`,
+		inClause, inClause,
+	)
+	args = append(args, peerAgent, peerAgent)
+	for _, a := range agents {
+		args = append(args, a)
+	}
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get dm messages: %w", err)
+	}
+	defer rows.Close()
 	return scanMessages(rows)
 }
 

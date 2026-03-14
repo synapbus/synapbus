@@ -100,6 +100,7 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Post("/api/agents", agentsHandler.RegisterAgent)
 			r.Delete("/api/agents/{name}", agentsHandler.DeleteAgent)
 			r.Post("/api/agents/{name}/revoke-key", agentsHandler.RevokeKey)
+			r.Get("/api/agents/{name}/messages", messagesHandler.DMMessages)
 		})
 
 		// API Keys
@@ -124,6 +125,7 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 				r.Get("/api/channels", channelsHandler.ListChannels)
 				r.Get("/api/channels/{name}", channelsHandler.GetChannel)
 				r.Post("/api/channels", channelsHandler.CreateChannel)
+				r.Get("/api/channels/{name}/messages", channelsHandler.ChannelMessages)
 				r.Post("/api/channels/{name}/join", channelsHandler.JoinChannel)
 				r.Post("/api/channels/{name}/leave", channelsHandler.LeaveChannel)
 			})

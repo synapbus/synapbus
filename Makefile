@@ -7,7 +7,7 @@ LDFLAGS := -s -w
 
 CGO_ENABLED := 0
 
-build:
+build: web
 	CGO_ENABLED=$(CGO_ENABLED) go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/synapbus
 
 test:
@@ -17,7 +17,7 @@ dev:
 	CGO_ENABLED=$(CGO_ENABLED) go run ./cmd/synapbus serve
 
 web:
-	cd web && npm install && npm run build
+	cd web && npm install --legacy-peer-deps && npm run build
 	rm -rf internal/web/dist
 	cp -r web/build internal/web/dist
 

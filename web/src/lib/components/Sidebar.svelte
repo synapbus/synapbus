@@ -43,17 +43,30 @@
 
 	const adminLinks = [
 		{ href: '/agents', label: 'Agents' },
-		{ href: '/settings', label: 'Settings' },
-		{ href: '/settings/api-keys', label: 'API Keys' }
+		{ href: '/settings', label: 'Settings' }
 	];
 </script>
 
 <aside class="fixed top-0 left-0 z-40 h-screen w-[260px] bg-bg-secondary border-r border-border flex flex-col select-none">
 	<!-- Workspace header -->
 	<div class="flex items-center gap-2.5 h-14 px-4 border-b border-border flex-shrink-0">
-		<div class="w-7 h-7 rounded-lg bg-accent-purple flex items-center justify-center">
-			<svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-				<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+		<div class="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-purple to-[#06b6d4] flex items-center justify-center">
+			<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none">
+				<circle cx="12" cy="5" r="1.8" fill="#c4b5fd" />
+				<circle cx="6" cy="10" r="1.5" fill="#a78bfa" />
+				<circle cx="18" cy="9" r="1.5" fill="#c4b5fd" />
+				<circle cx="12" cy="13" r="2" fill="#67e8f9" />
+				<circle cx="5" cy="17" r="1.5" fill="#a78bfa" />
+				<circle cx="19" cy="17" r="1.3" fill="#a78bfa" />
+				<circle cx="11" cy="20" r="1.3" fill="#c4b5fd" />
+				<line x1="12" y1="5" x2="6" y2="10" stroke="white" stroke-width="0.5" opacity="0.5" />
+				<line x1="12" y1="5" x2="18" y2="9" stroke="white" stroke-width="0.5" opacity="0.5" />
+				<line x1="6" y1="10" x2="12" y2="13" stroke="white" stroke-width="0.5" opacity="0.5" />
+				<line x1="18" y1="9" x2="12" y2="13" stroke="white" stroke-width="0.5" opacity="0.5" />
+				<line x1="12" y1="13" x2="5" y2="17" stroke="white" stroke-width="0.5" opacity="0.5" />
+				<line x1="12" y1="13" x2="19" y2="17" stroke="white" stroke-width="0.5" opacity="0.5" />
+				<line x1="5" y1="17" x2="11" y2="20" stroke="white" stroke-width="0.5" opacity="0.3" />
+				<line x1="6" y1="10" x2="5" y2="17" stroke="white" stroke-width="0.5" opacity="0.3" />
 			</svg>
 		</div>
 		<div class="min-w-0 flex-1">
@@ -174,8 +187,8 @@
 					{:else}
 						{#each agentList as agent}
 							<a
-								href="/agents/{agent.name}"
-								class="sidebar-item {isActive('/agents/' + agent.name) ? 'sidebar-item-active' : ''}"
+								href="/dm/{agent.name}"
+								class="sidebar-item {isActive('/dm/' + agent.name) ? 'sidebar-item-active' : ''}"
 							>
 								<span class="relative flex-shrink-0">
 									<span class="w-5 h-5 rounded-full bg-bg-tertiary flex items-center justify-center text-[10px] font-bold text-text-secondary">
@@ -196,7 +209,7 @@
 			{/if}
 		</div>
 
-		<!-- Admin section -->
+		<!-- Manage section -->
 		<div class="mb-3">
 			<button
 				class="section-header w-full hover:text-text-primary transition-colors"
@@ -206,7 +219,7 @@
 					<svg class="w-3 h-3 transition-transform {adminExpanded ? 'rotate-0' : '-rotate-90'}" fill="currentColor" viewBox="0 0 20 20">
 						<path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
 					</svg>
-					Admin
+					Manage
 				</span>
 			</button>
 			{#if adminExpanded}
@@ -224,10 +237,6 @@
 								<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
 									<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-								</svg>
-							{:else if link.label === 'API Keys'}
-								<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
 								</svg>
 							{/if}
 							{link.label}

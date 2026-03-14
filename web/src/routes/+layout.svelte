@@ -55,7 +55,7 @@
 		<Sidebar />
 		<div class="ml-[260px] flex-1 flex flex-col min-w-0">
 			<Header />
-			<main class="flex-1 overflow-y-auto">
+			<main class="flex-1 overflow-y-auto flex flex-col">
 				{@render children()}
 			</main>
 		</div>

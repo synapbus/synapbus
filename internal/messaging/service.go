@@ -336,6 +336,24 @@ func (s *MessagingService) GetReplies(ctx context.Context, messageID int64) ([]*
 	return replies, nil
 }
 
+// GetChannelMessages returns messages posted to a channel.
+func (s *MessagingService) GetChannelMessages(ctx context.Context, channelID int64, limit int) ([]*Message, error) {
+	messages, err := s.store.GetChannelMessages(ctx, channelID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get channel messages: %w", err)
+	}
+	return messages, nil
+}
+
+// GetDMMessages returns direct messages between owned agents and a peer agent.
+func (s *MessagingService) GetDMMessages(ctx context.Context, ownedAgents []string, peerAgent string, limit int) ([]*Message, error) {
+	messages, err := s.store.GetDMMessages(ctx, ownedAgents, peerAgent, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get dm messages: %w", err)
+	}
+	return messages, nil
+}
+
 // GetConversation returns a conversation and its messages.
 func (s *MessagingService) GetConversation(ctx context.Context, id int64) (*Conversation, []*Message, error) {
 	conv, err := s.store.GetConversation(ctx, id)

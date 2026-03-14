@@ -62,7 +62,7 @@ export const messages = {
 		return request<{ messages: any[]; total: number }>('GET', `/api/messages${q ? '?' + q : ''}`);
 	},
 	get: (id: number) => request<any>('GET', `/api/messages/${id}`),
-	send: (body: { from?: string; to: string; body: string; priority?: number; subject?: string; channel_id?: number }) =>
+	send: (body: { from?: string; to?: string; body: string; priority?: number; subject?: string; channel_id?: number }) =>
 		request<any>('POST', '/api/messages', body),
 	markDone: (id: number) => request<{ status: string }>('POST', `/api/messages/${id}/done`),
 	search: (q: string, limit?: number) => {
@@ -86,7 +86,11 @@ export const agents = {
 		request<{ agent: any; api_key: string }>('POST', '/api/agents', body),
 	delete: (name: string) => request<{ status: string }>('DELETE', `/api/agents/${encodeURIComponent(name)}`),
 	revokeKey: (name: string) =>
-		request<{ agent: any; api_key: string }>('POST', `/api/agents/${encodeURIComponent(name)}/revoke-key`)
+		request<{ agent: any; api_key: string }>('POST', `/api/agents/${encodeURIComponent(name)}/revoke-key`),
+	messages: (name: string, limit?: number) => {
+		const qs = limit ? `?limit=${limit}` : '';
+		return request<{ messages: any[]; total: number }>('GET', `/api/agents/${encodeURIComponent(name)}/messages${qs}`);
+	}
 };
 
 // Channels
@@ -98,7 +102,11 @@ export const channels = {
 	join: (name: string, agent?: string) =>
 		request<{ status: string }>('POST', `/api/channels/${encodeURIComponent(name)}/join`, agent ? { agent } : {}),
 	leave: (name: string, agent?: string) =>
-		request<{ status: string }>('POST', `/api/channels/${encodeURIComponent(name)}/leave`, agent ? { agent } : {})
+		request<{ status: string }>('POST', `/api/channels/${encodeURIComponent(name)}/leave`, agent ? { agent } : {}),
+	messages: (name: string, limit?: number) => {
+		const qs = limit ? `?limit=${limit}` : '';
+		return request<{ messages: any[]; total: number }>('GET', `/api/channels/${encodeURIComponent(name)}/messages${qs}`);
+	}
 };
 
 // API Keys

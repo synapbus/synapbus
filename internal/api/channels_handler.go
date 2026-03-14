@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -196,6 +197,41 @@ func (h *ChannelsHandler) JoinChannel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "joined"})
+}
+
+// ChannelMessages handles GET /api/channels/{name}/messages.
+func (h *ChannelsHandler) ChannelMessages(w http.ResponseWriter, r *http.Request) {
+	_, ok := OwnerIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody("unauthorized", "Authentication required"))
+		return
+	}
+
+	name := chi.URLParam(r, "name")
+	ch, err := h.channelService.GetChannelByName(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, errorBody("not_found", "Channel not found"))
+		return
+	}
+
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	msgs, err := h.msgService.GetChannelMessages(r.Context(), ch.ID, limit)
+	if err != nil {
+		h.logger.Error("get channel messages failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to get messages"))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages": msgs,
+		"total":    len(msgs),
+	})
 }
 
 // LeaveChannel handles POST /api/channels/{name}/leave.

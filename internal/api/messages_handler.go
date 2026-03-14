@@ -425,6 +425,51 @@ func (h *MessagesHandler) GetReplies(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DMMessages handles GET /api/agents/{name}/messages — returns DM messages with a specific agent.
+func (h *MessagesHandler) DMMessages(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := OwnerIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody("unauthorized", "Authentication required"))
+		return
+	}
+
+	peerAgent := chi.URLParam(r, "name")
+
+	ownedAgents, err := h.agentService.ListAgents(r.Context(), ownerID)
+	if err != nil {
+		h.logger.Error("list agents failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to list agents"))
+		return
+	}
+
+	if len(ownedAgents) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"messages": []*messaging.Message{}, "total": 0})
+		return
+	}
+
+	agentNames := make([]string, len(ownedAgents))
+	for i, a := range ownedAgents {
+		agentNames[i] = a.Name
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 100
+	}
+
+	msgs, err := h.msgService.GetDMMessages(r.Context(), agentNames, peerAgent, limit)
+	if err != nil {
+		h.logger.Error("get dm messages failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to get messages"))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages": msgs,
+		"total":    len(msgs),
+	})
+}
+
 func (h *MessagesHandler) isAgentOwnedBy(r *http.Request, agentName string, ownerID int64) bool {
 	if agentName == "" {
 		return false
