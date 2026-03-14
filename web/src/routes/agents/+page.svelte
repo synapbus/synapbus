@@ -14,6 +14,96 @@
 	let newApiKey = $state('');
 	let copiedField = $state('');
 
+	type ClientId = 'claude-code' | 'gemini' | 'cursor' | 'windsurf' | 'vscode' | 'claude-desktop';
+	type AuthMode = 'apikey' | 'oauth';
+
+	let selectedClient = $state<ClientId>('claude-code');
+	let authMode = $state<AuthMode>('apikey');
+
+	const clients: { id: ClientId; label: string; icon: string }[] = [
+		{ id: 'claude-code', label: 'Claude Code', icon: 'C' },
+		{ id: 'gemini', label: 'Gemini CLI', icon: 'G' },
+		{ id: 'cursor', label: 'Cursor', icon: 'Cu' },
+		{ id: 'windsurf', label: 'Windsurf', icon: 'W' },
+		{ id: 'vscode', label: 'VS Code', icon: 'VS' },
+		{ id: 'claude-desktop', label: 'Claude Desktop', icon: 'CD' },
+	];
+
+	let mcpUrl = $derived(typeof window !== 'undefined' ? `${window.location.origin}/mcp` : 'http://localhost:8080/mcp');
+
+	function getCliCommand(client: ClientId, mode: AuthMode, apiKey: string): string | null {
+		if (mode === 'apikey') {
+			switch (client) {
+				case 'claude-code':
+					return `claude mcp add --transport http synapbus ${mcpUrl} \\
+  --header "Authorization: Bearer ${apiKey}"`;
+				case 'gemini':
+					return `gemini mcp add --transport http \\
+  --header "Authorization: Bearer ${apiKey}" \\
+  synapbus ${mcpUrl}`;
+				default:
+					return null;
+			}
+		} else {
+			switch (client) {
+				case 'claude-code':
+					return `claude mcp add --transport http synapbus ${mcpUrl}`;
+				case 'gemini':
+					return `gemini mcp add --transport http synapbus ${mcpUrl}`;
+				default:
+					return null;
+			}
+		}
+	}
+
+	function getConfigJson(client: ClientId, mode: AuthMode, apiKey: string): string {
+		const url = mcpUrl;
+		if (mode === 'oauth') {
+			switch (client) {
+				case 'claude-code':
+					return JSON.stringify({ mcpServers: { synapbus: { type: "http", url } } }, null, 2);
+				case 'gemini':
+					return JSON.stringify({ mcpServers: { synapbus: { httpUrl: url } } }, null, 2);
+				case 'cursor':
+					return JSON.stringify({ mcpServers: { synapbus: { url } } }, null, 2);
+				case 'windsurf':
+					return JSON.stringify({ mcpServers: { synapbus: { serverUrl: url } } }, null, 2);
+				case 'vscode':
+					return JSON.stringify({ servers: { synapbus: { type: "http", url } } }, null, 2);
+				case 'claude-desktop':
+					return `Add via Settings > Connectors in Claude Desktop.\nURL: ${url}\nOAuth login will be handled automatically.`;
+			}
+		}
+		switch (client) {
+			case 'claude-code':
+				return JSON.stringify({ mcpServers: { synapbus: { type: "http", url, headers: { Authorization: `Bearer ${apiKey}` } } } }, null, 2);
+			case 'gemini':
+				return JSON.stringify({ mcpServers: { synapbus: { httpUrl: url, headers: { Authorization: `Bearer ${apiKey}` } } } }, null, 2);
+			case 'cursor':
+				return JSON.stringify({ mcpServers: { synapbus: { url, headers: { Authorization: `Bearer ${apiKey}` } } } }, null, 2);
+			case 'windsurf':
+				return JSON.stringify({ mcpServers: { synapbus: { serverUrl: url, headers: { Authorization: `Bearer ${apiKey}` } } } }, null, 2);
+			case 'vscode':
+				return JSON.stringify({ servers: { synapbus: { type: "http", url, headers: { Authorization: `Bearer ${apiKey}` } } } }, null, 2);
+			case 'claude-desktop':
+				return JSON.stringify({ mcpServers: { synapbus: { command: "npx", args: ["mcp-remote", url, "--header", `Authorization: Bearer ${apiKey}`] } } }, null, 2);
+		}
+	}
+
+	function getConfigFilePath(client: ClientId): string {
+		switch (client) {
+			case 'claude-code': return '.mcp.json or ~/.claude.json';
+			case 'gemini': return '~/.gemini/settings.json';
+			case 'cursor': return '.cursor/mcp.json';
+			case 'windsurf': return '~/.codeium/windsurf/mcp_config.json';
+			case 'vscode': return '.vscode/mcp.json';
+			case 'claude-desktop': return '~/Library/Application Support/Claude/claude_desktop_config.json';
+		}
+	}
+
+	let currentConfig = $derived(getConfigJson(selectedClient, authMode, newApiKey));
+	let currentCli = $derived(getCliCommand(selectedClient, authMode, newApiKey));
+
 	async function loadAgents() {
 		loadingData = true;
 		try {
@@ -64,6 +154,8 @@
 		newName = '';
 		newDisplayName = '';
 		registerError = '';
+		selectedClient = 'claude-code';
+		authMode = 'apikey';
 	}
 
 	async function copyText(text: string, label: string) {
@@ -75,17 +167,6 @@
 			// fallback
 		}
 	}
-
-	let mcpConfig = $derived(newApiKey ? JSON.stringify({
-		mcpServers: {
-			synapbus: {
-				url: `${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080'}/mcp`,
-				headers: {
-					Authorization: `Bearer ${newApiKey}`
-				}
-			}
-		}
-	}, null, 2) : '');
 </script>
 
 <div class="p-5 max-w-5xl">
@@ -105,7 +186,7 @@
 
 	{#if showRegister}
 		{#if newApiKey}
-			<!-- Success state: show credentials -->
+			<!-- Success state: show credentials + MCP setup -->
 			<div class="card p-5 mb-5">
 				<div class="flex items-center gap-2 mb-4">
 					<div class="w-8 h-8 rounded-full bg-accent-green/20 flex items-center justify-center">
@@ -133,19 +214,67 @@
 					<code class="block p-3 bg-bg-primary rounded text-xs font-mono text-accent-green break-all select-all border border-accent-green/20">{newApiKey}</code>
 				</div>
 
-				<!-- MCP Config -->
+				<!-- Client tabs -->
+				<div class="mb-3">
+					<label class="text-xs font-medium text-text-secondary mb-1.5 block">MCP Client</label>
+					<div class="flex gap-1 flex-wrap">
+						{#each clients as client (client.id)}
+							<button
+								class="px-2.5 py-1.5 rounded text-xs font-medium transition-colors {selectedClient === client.id ? 'bg-accent-green text-white' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/80'}"
+								onclick={() => (selectedClient = client.id)}
+							>
+								<span class="font-mono text-[10px] mr-1 opacity-70">{client.icon}</span>{client.label}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<!-- Auth mode switcher -->
+				<div class="mb-4">
+					<div class="flex items-center gap-2">
+						<label class="text-xs font-medium text-text-secondary">Auth:</label>
+						<div class="flex rounded overflow-hidden border border-border">
+							<button
+								class="px-3 py-1 text-xs transition-colors {authMode === 'apikey' ? 'bg-accent-green text-white' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary'}"
+								onclick={() => (authMode = 'apikey')}
+							>API Key</button>
+							<button
+								class="px-3 py-1 text-xs transition-colors {authMode === 'oauth' ? 'bg-accent-green text-white' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary'}"
+								onclick={() => (authMode = 'oauth')}
+							>OAuth</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- CLI command (if available) -->
+				{#if currentCli}
+					<div class="mb-4">
+						<div class="flex items-center justify-between mb-1.5">
+							<label class="text-xs font-medium text-text-secondary">CLI Command</label>
+							<button
+								class="text-xs text-text-secondary hover:text-text-primary transition-colors"
+								onclick={() => copyText(currentCli, 'cli')}
+							>
+								{copiedField === 'cli' ? 'Copied!' : 'Copy'}
+							</button>
+						</div>
+						<pre class="p-3 bg-bg-primary rounded text-xs font-mono text-accent-green break-all select-all border border-accent-green/20 overflow-x-auto">{currentCli}</pre>
+					</div>
+				{/if}
+
+				<!-- JSON config -->
 				<div class="mb-4">
 					<div class="flex items-center justify-between mb-1.5">
-						<label class="text-xs font-medium text-text-secondary">MCP Configuration</label>
+						<label class="text-xs font-medium text-text-secondary">JSON Configuration</label>
 						<button
 							class="text-xs text-text-secondary hover:text-text-primary transition-colors"
-							onclick={() => copyText(mcpConfig, 'mcp')}
+							onclick={() => copyText(currentConfig, 'config')}
 						>
-							{copiedField === 'mcp' ? 'Copied!' : 'Copy'}
+							{copiedField === 'config' ? 'Copied!' : 'Copy'}
 						</button>
 					</div>
-					<pre class="p-3 bg-bg-primary rounded text-xs font-mono text-text-primary break-all select-all border border-border overflow-x-auto">{mcpConfig}</pre>
-					<p class="text-[10px] text-text-secondary mt-1.5">Add this to your agent's MCP configuration (e.g. claude_desktop_config.json)</p>
+					<pre class="p-3 bg-bg-primary rounded text-xs font-mono text-text-primary break-all select-all border border-border overflow-x-auto">{currentConfig}</pre>
+					<p class="text-[10px] text-text-secondary mt-1.5">Add to <code class="font-mono">{getConfigFilePath(selectedClient)}</code></p>
 				</div>
 
 				<button
