@@ -98,6 +98,8 @@ make lint           # Run linters
 - modernc.org/sqlite (pure Go), migration 009_webhooks.sql (003-webhooks-k8s-runner)
 - Go 1.25+ (per go.mod) + mark3labs/mcp-go (MCP tools), go-chi/chi (HTTP), spf13/cobra (CLI), modernc.org/sqlite (storage), TFMV/hnsw (vectors) (004-embeddings-retention-inbox)
 - SQLite (modernc.org/sqlite, pure Go) — single DB file in `--data` directory (004-embeddings-retention-inbox)
+- Go 1.25+ (per go.mod) + spf13/cobra (CLI), go-chi/chi (HTTP), mark3labs/mcp-go (MCP) (006-admin-cli-docker-fixes)
+- modernc.org/sqlite (pure Go, zero CGO) (006-admin-cli-docker-fixes)
 
 ## Recent Changes
 - 002-mcp-auth-ux-polish: Added Go 1.23+ + ory/fosite (OAuth 2.1), mark3labs/mcp-go (MCP server), go-chi/chi (HTTP), Svelte 5 + Tailwind (Web UI)

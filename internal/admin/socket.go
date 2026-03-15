@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/k8s"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/trace"
@@ -162,6 +163,10 @@ func (s *AdminServer) dispatch(req Request) Response {
 		return s.handleChannelsList(ctx)
 	case "channels.show":
 		return s.handleChannelsShow(ctx, req.Args)
+	case "channels.create":
+		return s.handleChannelsCreate(ctx, req.Args)
+	case "channels.join":
+		return s.handleChannelsJoin(ctx, req.Args)
 
 	// --- conversations ---
 	case "conversations.list":
@@ -884,6 +889,78 @@ func (s *AdminServer) handleChannelsShow(ctx context.Context, args json.RawMessa
 	return Response{OK: true, Data: map[string]interface{}{
 		"channel": ch,
 		"members": memberRows,
+	}}
+}
+
+func (s *AdminServer) handleChannelsCreate(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.Name == "" {
+		return Response{OK: false, Error: "name is required"}
+	}
+
+	ch, err := s.services.Channels.CreateChannel(ctx, channels.CreateChannelRequest{
+		Name:        p.Name,
+		Description: p.Description,
+		Type:        "standard",
+		CreatedBy:   "system",
+	})
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+
+	return Response{OK: true, Data: map[string]interface{}{
+		"id":          ch.ID,
+		"name":        ch.Name,
+		"description": ch.Description,
+		"type":        ch.Type,
+		"is_private":  ch.IsPrivate,
+		"created_by":  ch.CreatedBy,
+		"created_at":  ch.CreatedAt.Format(time.RFC3339),
+	}}
+}
+
+func (s *AdminServer) handleChannelsJoin(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Channel string `json:"channel"`
+		Agent   string `json:"agent"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.Channel == "" {
+		return Response{OK: false, Error: "channel is required"}
+	}
+	if p.Agent == "" {
+		return Response{OK: false, Error: "agent is required"}
+	}
+
+	ch, err := s.services.Channels.GetChannelByName(ctx, p.Channel)
+	if err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("channel not found: %s", p.Channel)}
+	}
+
+	// Check if already a member for status reporting
+	isMember, _ := s.services.Channels.IsMember(ctx, ch.ID, p.Agent)
+
+	if err := s.services.Channels.JoinChannel(ctx, ch.ID, p.Agent); err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+
+	status := "joined"
+	if isMember {
+		status = "already_member"
+	}
+
+	return Response{OK: true, Data: map[string]interface{}{
+		"channel": p.Channel,
+		"agent":   p.Agent,
+		"status":  status,
 	}}
 }
 

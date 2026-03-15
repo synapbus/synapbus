@@ -18,9 +18,8 @@ COPY --from=web-builder /app/web/build internal/web/dist/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${VERSION}" -o /synapbus ./cmd/synapbus/
 
 # Stage 3: Runtime
-FROM scratch
-COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=go-builder /usr/share/zoneinfo /usr/share/zoneinfo
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata
 COPY --from=go-builder /synapbus /synapbus
 EXPOSE 8080
 VOLUME ["/data"]

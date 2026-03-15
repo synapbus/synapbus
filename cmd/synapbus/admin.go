@@ -17,7 +17,7 @@ var adminSocket string
 // adminRequest sends a command over the Unix socket and returns the parsed response.
 func adminRequest(command string, args interface{}) (map[string]interface{}, error) {
 	socket := adminSocket
-	if s := os.Getenv("SYNAPBUS_SOCKET"); s != "" && socket == "./data/synapbus.sock" {
+	if s := os.Getenv("SYNAPBUS_SOCKET"); s != "" && socket == "/data/synapbus.sock" {
 		socket = s
 	}
 
@@ -561,7 +561,54 @@ func addAdminCommands(rootCmd *cobra.Command) {
 	channelsShowCmd.Flags().StringVar(&channelsShowName, "name", "", "Channel name")
 	channelsShowCmd.MarkFlagRequired("name")
 
-	channelsCmd.AddCommand(channelsListCmd, channelsShowCmd)
+	var (
+		channelsCreateName string
+		channelsCreateDesc string
+	)
+	channelsCreateCmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new channel",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("channels.create", map[string]string{
+				"name":        channelsCreateName,
+				"description": channelsCreateDesc,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	channelsCreateCmd.Flags().StringVar(&channelsCreateName, "name", "", "Channel name")
+	channelsCreateCmd.Flags().StringVar(&channelsCreateDesc, "description", "", "Channel description")
+	channelsCreateCmd.MarkFlagRequired("name")
+
+	var (
+		channelsJoinChannel string
+		channelsJoinAgent   string
+	)
+	channelsJoinCmd := &cobra.Command{
+		Use:   "join",
+		Short: "Add an agent to a channel",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("channels.join", map[string]string{
+				"channel": channelsJoinChannel,
+				"agent":   channelsJoinAgent,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	channelsJoinCmd.Flags().StringVar(&channelsJoinChannel, "channel", "", "Channel name")
+	channelsJoinCmd.Flags().StringVar(&channelsJoinAgent, "agent", "", "Agent name")
+	channelsJoinCmd.MarkFlagRequired("channel")
+	channelsJoinCmd.MarkFlagRequired("agent")
+
+	channelsCmd.AddCommand(channelsListCmd, channelsShowCmd, channelsCreateCmd, channelsJoinCmd)
 
 	// ----- conversations commands -----
 	conversationsCmd := &cobra.Command{
@@ -919,7 +966,7 @@ func addAdminCommands(rootCmd *cobra.Command) {
 	attachmentsCmd.AddCommand(attachmentsGCCmd)
 
 	// ----- add persistent flag and commands to root -----
-	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "./data/synapbus.sock", "Path to admin Unix socket")
+	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "/data/synapbus.sock", "Path to admin Unix socket")
 
 	rootCmd.AddCommand(userCmd, agentCmd, auditCmd, backupCmd, messagesCmd, channelsCmd, conversationsCmd, embeddingsCmd, dbCmd, retentionCmd, webhookCmd, k8sCmd, attachmentsCmd)
 }

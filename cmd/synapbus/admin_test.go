@@ -196,6 +196,85 @@ func TestK8sRegisterOptionalFlags(t *testing.T) {
 	}
 }
 
+func TestChannelsCreateCommandRegistered(t *testing.T) {
+	root := buildTestRoot()
+	cmd := findSubcommand(root, "channels", "create")
+	if cmd == nil {
+		t.Fatal("channels create command not found")
+	}
+}
+
+func TestChannelsCreateRequiredFlags(t *testing.T) {
+	root := buildTestRoot()
+	cmd := findSubcommand(root, "channels", "create")
+	if cmd == nil {
+		t.Fatal("channels create command not found")
+	}
+
+	// --name is required
+	f := cmd.Flag("name")
+	if f == nil {
+		t.Fatal("flag --name not found on channels create")
+	}
+	ann := f.Annotations
+	if ann == nil {
+		t.Fatal("flag --name should be required")
+	}
+	if _, ok := ann[cobra.BashCompOneRequiredFlag]; !ok {
+		t.Fatal("flag --name should be required")
+	}
+
+	// --description is optional
+	df := cmd.Flag("description")
+	if df == nil {
+		t.Fatal("flag --description not found on channels create")
+	}
+}
+
+func TestChannelsJoinCommandRegistered(t *testing.T) {
+	root := buildTestRoot()
+	cmd := findSubcommand(root, "channels", "join")
+	if cmd == nil {
+		t.Fatal("channels join command not found")
+	}
+}
+
+func TestChannelsJoinRequiredFlags(t *testing.T) {
+	root := buildTestRoot()
+	cmd := findSubcommand(root, "channels", "join")
+	if cmd == nil {
+		t.Fatal("channels join command not found")
+	}
+
+	requiredFlags := []string{"channel", "agent"}
+	for _, flag := range requiredFlags {
+		f := cmd.Flag(flag)
+		if f == nil {
+			t.Errorf("flag --%s not found on channels join", flag)
+			continue
+		}
+		ann := f.Annotations
+		if ann == nil {
+			t.Errorf("flag --%s should be required", flag)
+			continue
+		}
+		if _, ok := ann[cobra.BashCompOneRequiredFlag]; !ok {
+			t.Errorf("flag --%s should be required", flag)
+		}
+	}
+}
+
+func TestDefaultSocketPath(t *testing.T) {
+	root := buildTestRoot()
+	f := root.PersistentFlags().Lookup("socket")
+	if f == nil {
+		t.Fatal("--socket persistent flag not found")
+	}
+	if f.DefValue != "/data/synapbus.sock" {
+		t.Errorf("default socket path = %q, want %q", f.DefValue, "/data/synapbus.sock")
+	}
+}
+
 func TestExistingCommandsStillPresent(t *testing.T) {
 	root := buildTestRoot()
 
