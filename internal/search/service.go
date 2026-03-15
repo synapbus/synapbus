@@ -207,11 +207,12 @@ func (s *Service) fulltextSearch(ctx context.Context, agentName string, opts Sea
 		msgOpts.ChannelID = opts.ChannelID
 	}
 
-	messages, err := s.msgService.SearchMessages(ctx, agentName, opts.Query, msgOpts)
+	paginated, err := s.msgService.SearchMessages(ctx, agentName, opts.Query, msgOpts)
 	if err != nil {
 		return nil, fmt.Errorf("fulltext search: %w", err)
 	}
 
+	messages := paginated.Messages
 	results := make([]*SearchResult, len(messages))
 	for i, msg := range messages {
 		results[i] = &SearchResult{

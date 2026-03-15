@@ -14,6 +14,7 @@ type ChannelStore interface {
 	GetChannel(ctx context.Context, id int64) (*Channel, error)
 	GetChannelByName(ctx context.Context, name string) (*Channel, error)
 	ListChannels(ctx context.Context, agentName string) ([]*Channel, error)
+	CountChannels(ctx context.Context, agentName string) (int, error)
 	UpdateChannel(ctx context.Context, ch *Channel) error
 	DeleteChannel(ctx context.Context, id int64) error
 	AddMember(ctx context.Context, m *Membership) error
@@ -146,6 +147,23 @@ func (s *SQLiteChannelStore) ListChannels(ctx context.Context, agentName string)
 		channels = []*Channel{}
 	}
 	return channels, rows.Err()
+}
+
+// CountChannels returns the total number of channels visible to the agent.
+func (s *SQLiteChannelStore) CountChannels(ctx context.Context, agentName string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT c.id)
+		 FROM channels c
+		 WHERE c.is_private = 0
+		    OR EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = c.id AND cm.agent_name = ?)
+		    OR EXISTS (SELECT 1 FROM channel_invites ci WHERE ci.channel_id = c.id AND ci.agent_name = ? AND ci.status = 'pending')`,
+		agentName, agentName,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count channels: %w", err)
+	}
+	return count, nil
 }
 
 // UpdateChannel updates a channel's mutable fields.
