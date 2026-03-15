@@ -43,6 +43,28 @@ type ChannelWithCount struct {
 	MemberCount int `json:"member_count"`
 }
 
+// PaginatedChannels holds a page of channels with total count.
+type PaginatedChannels struct {
+	Channels []*ChannelWithCount `json:"channels"`
+	Total    int                 `json:"total"`
+	Offset   int                 `json:"offset"`
+	Limit    int                 `json:"limit"`
+}
+
+// ListChannelsOptions configures channel listing behavior.
+type ListChannelsOptions struct {
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+}
+
+// PaginatedTasks holds a page of tasks with total count.
+type PaginatedTasks struct {
+	Tasks  []*Task `json:"tasks"`
+	Total  int     `json:"total"`
+	Offset int     `json:"offset"`
+	Limit  int     `json:"limit"`
+}
+
 // Membership represents the relationship between an agent and a channel.
 type Membership struct {
 	ID        int64     `json:"id"`

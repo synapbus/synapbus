@@ -193,15 +193,18 @@ func TestMessagingService_ReadInbox(t *testing.T) {
 	}
 
 	t.Run("returns messages ordered by priority desc", func(t *testing.T) {
-		messages, err := svc.ReadInbox(ctx, "receiver", ReadOptions{IncludeRead: true})
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{IncludeRead: true})
 		if err != nil {
 			t.Fatalf("ReadInbox: %v", err)
 		}
-		if len(messages) != 2 {
-			t.Fatalf("got %d messages, want 2", len(messages))
+		if len(result.Messages) != 2 {
+			t.Fatalf("got %d messages, want 2", len(result.Messages))
 		}
-		if messages[0].Priority < messages[1].Priority {
-			t.Errorf("messages not ordered by priority desc: %d, %d", messages[0].Priority, messages[1].Priority)
+		if result.Messages[0].Priority < result.Messages[1].Priority {
+			t.Errorf("messages not ordered by priority desc: %d, %d", result.Messages[0].Priority, result.Messages[1].Priority)
+		}
+		if result.Total != 2 {
+			t.Errorf("total = %d, want 2", result.Total)
 		}
 	})
 }
@@ -220,30 +223,30 @@ func TestMessagingService_ReadInbox_ReadUnread(t *testing.T) {
 	}
 
 	// First read
-	messages, err := svc.ReadInbox(ctx, "receiver", ReadOptions{})
+	result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{})
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
 	}
-	if len(messages) == 0 {
+	if len(result.Messages) == 0 {
 		t.Fatal("expected messages on first read")
 	}
 
 	// Second read without include_read
-	messages, err = svc.ReadInbox(ctx, "receiver", ReadOptions{})
+	result, err = svc.ReadInbox(ctx, "receiver", ReadOptions{})
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
 	}
-	if len(messages) != 0 {
-		t.Errorf("got %d messages on second read (no include_read), want 0", len(messages))
+	if len(result.Messages) != 0 {
+		t.Errorf("got %d messages on second read (no include_read), want 0", len(result.Messages))
 	}
 
 	// With include_read
-	messages, err = svc.ReadInbox(ctx, "receiver", ReadOptions{IncludeRead: true})
+	result, err = svc.ReadInbox(ctx, "receiver", ReadOptions{IncludeRead: true})
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Errorf("got %d messages with include_read, want 2", len(messages))
+	if len(result.Messages) != 2 {
+		t.Errorf("got %d messages with include_read, want 2", len(result.Messages))
 	}
 }
 
@@ -255,52 +258,52 @@ func TestMessagingService_ReadInbox_Filters(t *testing.T) {
 	svc.SendMessage(ctx, "sender", "receiver", "high pri", SendOptions{Priority: 8})
 
 	t.Run("filter by from_agent", func(t *testing.T) {
-		messages, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
 			FromAgent:   "sender",
 			IncludeRead: true,
 		})
 		if err != nil {
 			t.Fatalf("ReadInbox: %v", err)
 		}
-		if len(messages) != 2 {
-			t.Errorf("got %d messages from sender, want 2", len(messages))
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d messages from sender, want 2", len(result.Messages))
 		}
 
-		messages, err = svc.ReadInbox(ctx, "receiver", ReadOptions{
+		result, err = svc.ReadInbox(ctx, "receiver", ReadOptions{
 			FromAgent:   "nobody",
 			IncludeRead: true,
 		})
 		if err != nil {
 			t.Fatalf("ReadInbox: %v", err)
 		}
-		if len(messages) != 0 {
-			t.Errorf("got %d messages from nobody, want 0", len(messages))
+		if len(result.Messages) != 0 {
+			t.Errorf("got %d messages from nobody, want 0", len(result.Messages))
 		}
 	})
 
 	t.Run("filter by min_priority", func(t *testing.T) {
-		messages, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
 			MinPriority: 7,
 			IncludeRead: true,
 		})
 		if err != nil {
 			t.Fatalf("ReadInbox: %v", err)
 		}
-		if len(messages) != 1 {
-			t.Errorf("got %d messages with min_priority=7, want 1", len(messages))
+		if len(result.Messages) != 1 {
+			t.Errorf("got %d messages with min_priority=7, want 1", len(result.Messages))
 		}
 	})
 
 	t.Run("limit", func(t *testing.T) {
-		messages, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
 			Limit:       1,
 			IncludeRead: true,
 		})
 		if err != nil {
 			t.Fatalf("ReadInbox: %v", err)
 		}
-		if len(messages) != 1 {
-			t.Errorf("got %d messages with limit=1, want 1", len(messages))
+		if len(result.Messages) != 1 {
+			t.Errorf("got %d messages with limit=1, want 1", len(result.Messages))
 		}
 	})
 }
@@ -457,22 +460,25 @@ func TestMessagingService_SearchMessages(t *testing.T) {
 	svc.SendMessage(ctx, "sender", "receiver", "security alert detected", SendOptions{Priority: 9})
 
 	t.Run("keyword search", func(t *testing.T) {
-		results, err := svc.SearchMessages(ctx, "receiver", "deployment", SearchOptions{})
+		result, err := svc.SearchMessages(ctx, "receiver", "deployment", SearchOptions{})
 		if err != nil {
 			t.Fatalf("SearchMessages: %v", err)
 		}
-		if len(results) != 2 {
-			t.Errorf("got %d results, want 2", len(results))
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d results, want 2", len(result.Messages))
+		}
+		if result.Total != 2 {
+			t.Errorf("total = %d, want 2", result.Total)
 		}
 	})
 
 	t.Run("empty query returns recent", func(t *testing.T) {
-		results, err := svc.SearchMessages(ctx, "receiver", "", SearchOptions{})
+		result, err := svc.SearchMessages(ctx, "receiver", "", SearchOptions{})
 		if err != nil {
 			t.Fatalf("SearchMessages: %v", err)
 		}
-		if len(results) != 3 {
-			t.Errorf("got %d results, want 3", len(results))
+		if len(result.Messages) != 3 {
+			t.Errorf("got %d results, want 3", len(result.Messages))
 		}
 	})
 }
@@ -520,6 +526,206 @@ func TestMessagingService_TracesRecorded(t *testing.T) {
 	if count < 2 {
 		t.Errorf("expected at least 2 traces, got %d", count)
 	}
+}
+
+func TestMessagingService_ReadInbox_Pagination(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	// Send 5 messages
+	for i := 0; i < 5; i++ {
+		_, err := svc.SendMessage(ctx, "sender", "receiver", "paginated msg", SendOptions{Priority: 5})
+		if err != nil {
+			t.Fatalf("SendMessage: %v", err)
+		}
+	}
+
+	t.Run("offset pagination returns correct page", func(t *testing.T) {
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+			Limit:       2,
+			Offset:      0,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("ReadInbox: %v", err)
+		}
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+		if result.Offset != 0 {
+			t.Errorf("offset = %d, want 0", result.Offset)
+		}
+		if result.Limit != 2 {
+			t.Errorf("limit = %d, want 2", result.Limit)
+		}
+	})
+
+	t.Run("offset=3 returns remaining 2", func(t *testing.T) {
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+			Limit:       10,
+			Offset:      3,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("ReadInbox: %v", err)
+		}
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+	})
+
+	t.Run("offset beyond total returns empty", func(t *testing.T) {
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+			Limit:       10,
+			Offset:      100,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("ReadInbox: %v", err)
+		}
+		if len(result.Messages) != 0 {
+			t.Errorf("got %d messages, want 0", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+	})
+}
+
+func TestMessagingService_SearchMessages_Pagination(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		svc.SendMessage(ctx, "sender", "receiver", "searchable item", SendOptions{Priority: 5})
+	}
+
+	t.Run("pagination with total count", func(t *testing.T) {
+		result, err := svc.SearchMessages(ctx, "receiver", "searchable", SearchOptions{
+			Limit:  2,
+			Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d results, want 2", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+		if result.Offset != 0 {
+			t.Errorf("offset = %d, want 0", result.Offset)
+		}
+		if result.Limit != 2 {
+			t.Errorf("limit = %d, want 2", result.Limit)
+		}
+	})
+
+	t.Run("second page", func(t *testing.T) {
+		result, err := svc.SearchMessages(ctx, "receiver", "searchable", SearchOptions{
+			Limit:  2,
+			Offset: 2,
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d results, want 2", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+	})
+}
+
+func TestMessagingService_GetChannelMessages_Pagination(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+
+	// Create a channel
+	_, err := db.Exec(
+		`INSERT INTO channels (id, name, description, topic, type, is_private, is_system, created_by, created_at, updated_at)
+		 VALUES (1, 'pag-channel', '', '', 'standard', 0, 0, 'sender', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	chID := int64(1)
+	for i := 0; i < 5; i++ {
+		svc.SendMessage(ctx, "sender", "", "ch msg", SendOptions{
+			ChannelID: &chID,
+			Priority:  5,
+		})
+	}
+
+	t.Run("pagination with total", func(t *testing.T) {
+		result, err := svc.GetChannelMessages(ctx, 1, 2, 0)
+		if err != nil {
+			t.Fatalf("GetChannelMessages: %v", err)
+		}
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+		if result.Offset != 0 {
+			t.Errorf("offset = %d, want 0", result.Offset)
+		}
+	})
+
+	t.Run("offset=3 returns remaining", func(t *testing.T) {
+		result, err := svc.GetChannelMessages(ctx, 1, 10, 3)
+		if err != nil {
+			t.Fatalf("GetChannelMessages: %v", err)
+		}
+		if len(result.Messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(result.Messages))
+		}
+		if result.Total != 5 {
+			t.Errorf("total = %d, want 5", result.Total)
+		}
+	})
+}
+
+func TestMessagingService_ReadInbox_DateFiltering(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	svc.SendMessage(ctx, "sender", "receiver", "dated msg", SendOptions{Priority: 5})
+
+	t.Run("after in the past returns messages", func(t *testing.T) {
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+			IncludeRead: true,
+			After:       "2020-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("ReadInbox: %v", err)
+		}
+		if len(result.Messages) != 1 {
+			t.Errorf("got %d messages, want 1", len(result.Messages))
+		}
+	})
+
+	t.Run("after in the future returns empty", func(t *testing.T) {
+		result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{
+			IncludeRead: true,
+			After:       "2099-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("ReadInbox: %v", err)
+		}
+		if len(result.Messages) != 0 {
+			t.Errorf("got %d messages, want 0", len(result.Messages))
+		}
+	})
 }
 
 // suppress unused import warning for storage package

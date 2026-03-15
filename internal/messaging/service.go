@@ -176,10 +176,20 @@ func (s *MessagingService) SendMessage(ctx context.Context, from, to, body strin
 }
 
 // ReadInbox returns messages for an agent and advances the read position.
-func (s *MessagingService) ReadInbox(ctx context.Context, agentName string, opts ReadOptions) ([]*Message, error) {
+func (s *MessagingService) ReadInbox(ctx context.Context, agentName string, opts ReadOptions) (*PaginatedMessages, error) {
 	messages, err := s.store.GetInboxMessages(ctx, agentName, opts)
 	if err != nil {
 		return nil, fmt.Errorf("get inbox messages: %w", err)
+	}
+
+	total, err := s.store.CountInboxMessages(ctx, agentName, opts)
+	if err != nil {
+		return nil, fmt.Errorf("count inbox messages: %w", err)
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
 	}
 
 	// Advance inbox state for each conversation
@@ -212,7 +222,12 @@ func (s *MessagingService) ReadInbox(ctx context.Context, agentName string, opts
 		})
 	}
 
-	return messages, nil
+	return &PaginatedMessages{
+		Messages: messages,
+		Total:    total,
+		Offset:   opts.Offset,
+		Limit:    limit,
+	}, nil
 }
 
 // ClaimMessages atomically claims pending messages for processing.
@@ -333,10 +348,20 @@ func (s *MessagingService) MarkFailed(ctx context.Context, messageID int64, agen
 }
 
 // SearchMessages performs full-text search on messages.
-func (s *MessagingService) SearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) ([]*Message, error) {
+func (s *MessagingService) SearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) (*PaginatedMessages, error) {
 	messages, err := s.store.SearchMessages(ctx, agentName, query, opts)
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
+	}
+
+	total, err := s.store.CountSearchMessages(ctx, agentName, query, opts)
+	if err != nil {
+		return nil, fmt.Errorf("count search messages: %w", err)
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
 	}
 
 	s.logger.Info("messages searched",
@@ -352,7 +377,12 @@ func (s *MessagingService) SearchMessages(ctx context.Context, agentName, query 
 		})
 	}
 
-	return messages, nil
+	return &PaginatedMessages{
+		Messages: messages,
+		Total:    total,
+		Offset:   opts.Offset,
+		Limit:    limit,
+	}, nil
 }
 
 // GetPendingDMCount returns the total count of pending DMs for an agent.
@@ -397,12 +427,27 @@ func (s *MessagingService) GetReplies(ctx context.Context, messageID int64) ([]*
 }
 
 // GetChannelMessages returns messages posted to a channel.
-func (s *MessagingService) GetChannelMessages(ctx context.Context, channelID int64, limit int) ([]*Message, error) {
-	messages, err := s.store.GetChannelMessages(ctx, channelID, limit)
+func (s *MessagingService) GetChannelMessages(ctx context.Context, channelID int64, limit, offset int) (*PaginatedMessages, error) {
+	messages, err := s.store.GetChannelMessages(ctx, channelID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get channel messages: %w", err)
 	}
-	return messages, nil
+
+	total, err := s.store.CountChannelMessages(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("count channel messages: %w", err)
+	}
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	return &PaginatedMessages{
+		Messages: messages,
+		Total:    total,
+		Offset:   offset,
+		Limit:    limit,
+	}, nil
 }
 
 // GetDMMessages returns direct messages between owned agents and a peer agent.

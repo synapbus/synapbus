@@ -17,6 +17,9 @@ type ReadOptions struct {
 	ConversationID *int64 `json:"conversation_id,omitempty"`
 	MinPriority    int    `json:"min_priority,omitempty"`
 	Limit          int    `json:"limit,omitempty"`
+	Offset         int    `json:"offset,omitempty"`
+	After          string `json:"after,omitempty"`
+	Before         string `json:"before,omitempty"`
 	IncludeRead    bool   `json:"include_read,omitempty"`
 }
 
@@ -28,4 +31,8 @@ type SearchOptions struct {
 	MinPriority int    `json:"min_priority,omitempty"`
 	Status      string `json:"status,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
+	After       string `json:"after,omitempty"`
+	Before      string `json:"before,omitempty"`
+	Channel     string `json:"channel,omitempty"`
 }

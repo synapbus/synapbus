@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MessageStore defines the storage interface for messaging operations.
@@ -14,16 +15,19 @@ type MessageStore interface {
 	InsertConversation(ctx context.Context, conv *Conversation) error
 	FindConversation(ctx context.Context, subject, fromAgent, toAgent string) (*Conversation, error)
 	GetInboxMessages(ctx context.Context, agentName string, opts ReadOptions) ([]*Message, error)
+	CountInboxMessages(ctx context.Context, agentName string, opts ReadOptions) (int, error)
 	GetInboxState(ctx context.Context, agentName string, conversationID int64) (*InboxState, error)
 	UpdateInboxState(ctx context.Context, agentName string, conversationID int64, lastReadMsgID int64) error
 	ClaimMessages(ctx context.Context, agentName string, limit int) ([]*Message, error)
 	UpdateMessageStatus(ctx context.Context, id int64, status, claimedBy string, metadata json.RawMessage) error
 	GetMessageByID(ctx context.Context, id int64) (*Message, error)
 	SearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) ([]*Message, error)
+	CountSearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) (int, error)
 	GetConversation(ctx context.Context, id int64) (*Conversation, error)
 	GetConversationMessages(ctx context.Context, conversationID int64) ([]*Message, error)
 	GetReplies(ctx context.Context, messageID int64) ([]*Message, error)
-	GetChannelMessages(ctx context.Context, channelID int64, limit int) ([]*Message, error)
+	GetChannelMessages(ctx context.Context, channelID int64, limit, offset int) ([]*Message, error)
+	CountChannelMessages(ctx context.Context, channelID int64) (int, error)
 	GetDMMessages(ctx context.Context, agents []string, peerAgent string, limit int) ([]*Message, error)
 	AgentExists(ctx context.Context, agentName string) (bool, error)
 	CountPendingDMs(ctx context.Context, agentName string) (int64, error)
@@ -115,6 +119,58 @@ func (s *SQLiteMessageStore) InsertMessage(ctx context.Context, msg *Message) er
 }
 
 func (s *SQLiteMessageStore) GetInboxMessages(ctx context.Context, agentName string, opts ReadOptions) ([]*Message, error) {
+	conditions, args := s.buildInboxConditions(agentName, opts)
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := fmt.Sprintf(
+		`SELECT m.id, m.conversation_id, m.from_agent, m.to_agent, m.channel_id,
+		        m.body, m.priority, m.status, m.metadata, m.claimed_by, m.claimed_at,
+		        m.created_at, m.updated_at, m.reply_to
+		 FROM messages m
+		 WHERE %s
+		 ORDER BY m.priority DESC, m.created_at ASC
+		 LIMIT ? OFFSET ?`,
+		strings.Join(conditions, " AND "),
+	)
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query inbox: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
+// CountInboxMessages returns the total count of inbox messages matching the given options.
+func (s *SQLiteMessageStore) CountInboxMessages(ctx context.Context, agentName string, opts ReadOptions) (int, error) {
+	conditions, args := s.buildInboxConditions(agentName, opts)
+
+	query := fmt.Sprintf(
+		`SELECT COUNT(*) FROM messages m WHERE %s`,
+		strings.Join(conditions, " AND "),
+	)
+
+	var count int
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count inbox messages: %w", err)
+	}
+	return count, nil
+}
+
+// buildInboxConditions builds the WHERE conditions and args for inbox queries.
+func (s *SQLiteMessageStore) buildInboxConditions(agentName string, opts ReadOptions) ([]string, []any) {
 	var conditions []string
 	var args []any
 
@@ -151,30 +207,21 @@ func (s *SQLiteMessageStore) GetInboxMessages(ctx context.Context, agentName str
 		args = append(args, opts.MinPriority)
 	}
 
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 50
+	if opts.After != "" {
+		if t, err := time.Parse(time.RFC3339, opts.After); err == nil {
+			conditions = append(conditions, "m.created_at >= ?")
+			args = append(args, t.UTC().Format("2006-01-02 15:04:05"))
+		}
 	}
 
-	query := fmt.Sprintf(
-		`SELECT m.id, m.conversation_id, m.from_agent, m.to_agent, m.channel_id,
-		        m.body, m.priority, m.status, m.metadata, m.claimed_by, m.claimed_at,
-		        m.created_at, m.updated_at, m.reply_to
-		 FROM messages m
-		 WHERE %s
-		 ORDER BY m.priority DESC, m.created_at ASC
-		 LIMIT ?`,
-		strings.Join(conditions, " AND "),
-	)
-	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query inbox: %w", err)
+	if opts.Before != "" {
+		if t, err := time.Parse(time.RFC3339, opts.Before); err == nil {
+			conditions = append(conditions, "m.created_at <= ?")
+			args = append(args, t.UTC().Format("2006-01-02 15:04:05"))
+		}
 	}
-	defer rows.Close()
 
-	return scanMessages(rows)
+	return conditions, args
 }
 
 func (s *SQLiteMessageStore) GetInboxState(ctx context.Context, agentName string, conversationID int64) (*InboxState, error) {
@@ -333,6 +380,62 @@ func (s *SQLiteMessageStore) GetMessageByID(ctx context.Context, id int64) (*Mes
 }
 
 func (s *SQLiteMessageStore) SearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) ([]*Message, error) {
+	conditions, args, joinClause, orderClause := s.buildSearchConditions(agentName, query, opts)
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	querySQL := fmt.Sprintf(
+		`SELECT m.id, m.conversation_id, m.from_agent, m.to_agent, m.channel_id,
+		        m.body, m.priority, m.status, m.metadata, m.claimed_by, m.claimed_at,
+		        m.created_at, m.updated_at, m.reply_to
+		 FROM messages m
+		 %s
+		 WHERE %s
+		 %s
+		 LIMIT ? OFFSET ?`,
+		joinClause,
+		strings.Join(conditions, " AND "),
+		orderClause,
+	)
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, querySQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search messages: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMessages(rows)
+}
+
+// CountSearchMessages returns the total count of messages matching the search criteria.
+func (s *SQLiteMessageStore) CountSearchMessages(ctx context.Context, agentName, query string, opts SearchOptions) (int, error) {
+	conditions, args, joinClause, _ := s.buildSearchConditions(agentName, query, opts)
+
+	countSQL := fmt.Sprintf(
+		`SELECT COUNT(*) FROM messages m %s WHERE %s`,
+		joinClause,
+		strings.Join(conditions, " AND "),
+	)
+
+	var count int
+	err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count search messages: %w", err)
+	}
+	return count, nil
+}
+
+// buildSearchConditions builds the WHERE conditions, args, JOIN clause, and ORDER clause for search queries.
+func (s *SQLiteMessageStore) buildSearchConditions(agentName, query string, opts SearchOptions) ([]string, []any, string, string) {
 	var conditions []string
 	var args []any
 
@@ -374,33 +477,31 @@ func (s *SQLiteMessageStore) SearchMessages(ctx context.Context, agentName, quer
 		args = append(args, opts.Status)
 	}
 
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 20
+	if opts.ChannelID != nil {
+		conditions = append(conditions, "m.channel_id = ?")
+		args = append(args, *opts.ChannelID)
 	}
 
-	querySQL := fmt.Sprintf(
-		`SELECT m.id, m.conversation_id, m.from_agent, m.to_agent, m.channel_id,
-		        m.body, m.priority, m.status, m.metadata, m.claimed_by, m.claimed_at,
-		        m.created_at, m.updated_at, m.reply_to
-		 FROM messages m
-		 %s
-		 WHERE %s
-		 %s
-		 LIMIT ?`,
-		joinClause,
-		strings.Join(conditions, " AND "),
-		orderClause,
-	)
-	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, querySQL, args...)
-	if err != nil {
-		return nil, fmt.Errorf("search messages: %w", err)
+	if opts.Channel != "" {
+		conditions = append(conditions, "m.channel_id IN (SELECT id FROM channels WHERE LOWER(name) = LOWER(?))")
+		args = append(args, opts.Channel)
 	}
-	defer rows.Close()
 
-	return scanMessages(rows)
+	if opts.After != "" {
+		if t, err := time.Parse(time.RFC3339, opts.After); err == nil {
+			conditions = append(conditions, "m.created_at >= ?")
+			args = append(args, t.UTC().Format("2006-01-02 15:04:05"))
+		}
+	}
+
+	if opts.Before != "" {
+		if t, err := time.Parse(time.RFC3339, opts.Before); err == nil {
+			conditions = append(conditions, "m.created_at <= ?")
+			args = append(args, t.UTC().Format("2006-01-02 15:04:05"))
+		}
+	}
+
+	return conditions, args, joinClause, orderClause
 }
 
 func (s *SQLiteMessageStore) GetConversation(ctx context.Context, id int64) (*Conversation, error) {
@@ -451,9 +552,12 @@ func (s *SQLiteMessageStore) GetReplies(ctx context.Context, messageID int64) ([
 	return scanMessages(rows)
 }
 
-func (s *SQLiteMessageStore) GetChannelMessages(ctx context.Context, channelID int64, limit int) ([]*Message, error) {
+func (s *SQLiteMessageStore) GetChannelMessages(ctx context.Context, channelID int64, limit, offset int) ([]*Message, error) {
 	if limit <= 0 {
 		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, conversation_id, from_agent, to_agent, channel_id,
@@ -461,13 +565,25 @@ func (s *SQLiteMessageStore) GetChannelMessages(ctx context.Context, channelID i
 		        created_at, updated_at, reply_to
 		 FROM messages WHERE channel_id = ?
 		 ORDER BY created_at ASC
-		 LIMIT ?`, channelID, limit,
+		 LIMIT ? OFFSET ?`, channelID, limit, offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get channel messages: %w", err)
 	}
 	defer rows.Close()
 	return scanMessages(rows)
+}
+
+// CountChannelMessages returns the total number of messages in a channel.
+func (s *SQLiteMessageStore) CountChannelMessages(ctx context.Context, channelID int64) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages WHERE channel_id = ?`, channelID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count channel messages: %w", err)
+	}
+	return count, nil
 }
 
 func (s *SQLiteMessageStore) GetDMMessages(ctx context.Context, agents []string, peerAgent string, limit int) ([]*Message, error) {

@@ -67,12 +67,12 @@ func (h *MessagesHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			IncludeRead: true,
 			Status:      status,
 		}
-		msgs, err := h.msgService.ReadInbox(r.Context(), agent.Name, opts)
+		result, err := h.msgService.ReadInbox(r.Context(), agent.Name, opts)
 		if err != nil {
 			h.logger.Error("read inbox failed", "agent", agent.Name, "error", err)
 			continue
 		}
-		allMessages = append(allMessages, msgs...)
+		allMessages = append(allMessages, result.Messages...)
 	}
 
 	if allMessages == nil {
@@ -153,11 +153,11 @@ func (h *MessagesHandler) ListConversations(w http.ResponseWriter, r *http.Reque
 			Limit:       100,
 			IncludeRead: true,
 		}
-		msgs, err := h.msgService.ReadInbox(r.Context(), agent.Name, opts)
+		result, err := h.msgService.ReadInbox(r.Context(), agent.Name, opts)
 		if err != nil {
 			continue
 		}
-		for _, msg := range msgs {
+		for _, msg := range result.Messages {
 			existing, exists := convMap[msg.ConversationID]
 			if !exists {
 				convMap[msg.ConversationID] = &convSummary{
@@ -393,11 +393,11 @@ func (h *MessagesHandler) SearchMessages(w http.ResponseWriter, r *http.Request)
 	var allMessages []*messaging.Message
 	for _, agent := range ownedAgents {
 		opts := messaging.SearchOptions{Limit: limit}
-		msgs, err := h.msgService.SearchMessages(r.Context(), agent.Name, query, opts)
+		result, err := h.msgService.SearchMessages(r.Context(), agent.Name, query, opts)
 		if err != nil {
 			continue
 		}
-		allMessages = append(allMessages, msgs...)
+		allMessages = append(allMessages, result.Messages...)
 	}
 
 	if allMessages == nil {

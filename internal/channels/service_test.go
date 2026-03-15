@@ -549,12 +549,12 @@ func TestService_BroadcastMessage(t *testing.T) {
 	})
 
 	t.Run("broadcast visible via GetChannelMessages", func(t *testing.T) {
-		channelMsgs, err := svc.msgService.GetChannelMessages(ctx, ch.ID, 100)
+		channelResult, err := svc.msgService.GetChannelMessages(ctx, ch.ID, 100, 0)
 		if err != nil {
 			t.Fatalf("GetChannelMessages: %v", err)
 		}
 		found := false
-		for _, m := range channelMsgs {
+		for _, m := range channelResult.Messages {
 			if m.Body == "hello" && m.FromAgent == "agent-a" {
 				found = true
 				break
@@ -574,9 +574,9 @@ func TestService_BroadcastMessage(t *testing.T) {
 		}
 
 		// agent-b should have an inbox notification
-		inbox, _ := svc.msgService.ReadInbox(ctx, "agent-b", messaging.ReadOptions{IncludeRead: true})
+		inboxResult, _ := svc.msgService.ReadInbox(ctx, "agent-b", messaging.ReadOptions{IncludeRead: true})
 		found := false
-		for _, m := range inbox {
+		for _, m := range inboxResult.Messages {
 			if m.Body == "multi-member test" {
 				found = true
 				break
@@ -589,8 +589,8 @@ func TestService_BroadcastMessage(t *testing.T) {
 
 	t.Run("sender does not receive own message", func(t *testing.T) {
 		svc.BroadcastMessage(ctx, ch.ID, "agent-a", "no self-message", 5, "")
-		inbox, _ := svc.msgService.ReadInbox(ctx, "agent-a", messaging.ReadOptions{IncludeRead: true})
-		for _, m := range inbox {
+		inboxResult, _ := svc.msgService.ReadInbox(ctx, "agent-a", messaging.ReadOptions{IncludeRead: true})
+		for _, m := range inboxResult.Messages {
 			if m.Body == "no self-message" {
 				t.Error("sender should not receive their own broadcast in inbox")
 			}
@@ -625,9 +625,9 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 		}
 
 		// agent-b was mentioned — inbox notification should have mention:true
-		inbox, _ := svc.msgService.ReadInbox(ctx, "agent-b", messaging.ReadOptions{IncludeRead: true})
+		inboxResult, _ := svc.msgService.ReadInbox(ctx, "agent-b", messaging.ReadOptions{IncludeRead: true})
 		found := false
-		for _, m := range inbox {
+		for _, m := range inboxResult.Messages {
 			if m.Body == "hey @agent-b check this" {
 				found = true
 				var meta map[string]any
@@ -643,8 +643,8 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 		}
 
 		// agent-c was NOT mentioned — inbox notification should NOT have mention:true
-		inbox, _ = svc.msgService.ReadInbox(ctx, "agent-c", messaging.ReadOptions{IncludeRead: true})
-		for _, m := range inbox {
+		inboxResult, _ = svc.msgService.ReadInbox(ctx, "agent-c", messaging.ReadOptions{IncludeRead: true})
+		for _, m := range inboxResult.Messages {
 			if m.Body == "hey @agent-b check this" {
 				var meta map[string]any
 				json.Unmarshal(m.Metadata, &meta)
@@ -666,9 +666,9 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
 
-		channelMsgs, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10)
+		channelResult2, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10, 0)
 		found := false
-		for _, m := range channelMsgs {
+		for _, m := range channelResult2.Messages {
 			if m.Body == "cc @agent-b and @agent-c" {
 				found = true
 				var meta map[string]any
@@ -696,8 +696,8 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
 
-		channelMsgs, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10)
-		for _, m := range channelMsgs {
+		channelResult3, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10, 0)
+		for _, m := range channelResult3.Messages {
 			if m.Body == "I am @agent-a and cc @agent-b" {
 				var meta map[string]any
 				json.Unmarshal(m.Metadata, &meta)
@@ -721,8 +721,8 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
 
-		channelMsgs, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10)
-		for _, m := range channelMsgs {
+		channelResult4, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10, 0)
+		for _, m := range channelResult4.Messages {
 			if m.Body == "just a normal message" {
 				var meta map[string]any
 				json.Unmarshal(m.Metadata, &meta)
@@ -741,8 +741,8 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
 
-		channelMsgs, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10)
-		for _, m := range channelMsgs {
+		channelResult5, _ := svc.msgService.GetChannelMessages(ctx, ch.ID, 10, 0)
+		for _, m := range channelResult5.Messages {
 			if m.Body == "hey @outsider and @agent-b" {
 				var meta map[string]any
 				json.Unmarshal(m.Metadata, &meta)

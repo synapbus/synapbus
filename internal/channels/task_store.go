@@ -14,6 +14,7 @@ type TaskStore interface {
 	CreateTask(ctx context.Context, task *Task) error
 	GetTask(ctx context.Context, id int64) (*Task, error)
 	ListTasks(ctx context.Context, channelID int64, status string) ([]*Task, error)
+	CountTasks(ctx context.Context, channelID int64, status string) (int, error)
 	UpdateTaskStatus(ctx context.Context, id int64, status, assignedTo string) error
 	CreateBid(ctx context.Context, bid *Bid) error
 	GetBids(ctx context.Context, taskID int64) ([]*Bid, error)
@@ -128,6 +129,28 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, channelID int64, status
 	defer rows.Close()
 
 	return scanTasks(rows)
+}
+
+// CountTasks returns the total number of tasks for a channel, optionally filtered by status.
+func (s *SQLiteTaskStore) CountTasks(ctx context.Context, channelID int64, status string) (int, error) {
+	var count int
+	var err error
+
+	if status != "" {
+		err = s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM tasks WHERE channel_id = ? AND status = ?`,
+			channelID, status,
+		).Scan(&count)
+	} else {
+		err = s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM tasks WHERE channel_id = ?`,
+			channelID,
+		).Scan(&count)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("count tasks: %w", err)
+	}
+	return count, nil
 }
 
 // UpdateTaskStatus updates a task's status and optionally assigned_to.

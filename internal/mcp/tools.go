@@ -205,14 +205,17 @@ func (tr *ToolRegistrar) handleReadInbox(ctx context.Context, req mcp.CallToolRe
 		}
 	}
 
-	messages, err := tr.msgService.ReadInbox(ctx, agentName, opts)
+	result, err := tr.msgService.ReadInbox(ctx, agentName, opts)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("read_inbox failed: %s", err)), nil
 	}
 
 	return resultJSON(map[string]any{
-		"messages": messages,
-		"count":    len(messages),
+		"messages": result.Messages,
+		"count":    len(result.Messages),
+		"total":    result.Total,
+		"offset":   result.Offset,
+		"limit":    result.Limit,
 	})
 }
 
@@ -337,14 +340,17 @@ func (tr *ToolRegistrar) handleSearchMessages(ctx context.Context, req mcp.CallT
 		Status:      req.GetString("status", ""),
 	}
 
-	messages, err := tr.msgService.SearchMessages(ctx, agentName, query, msgOpts)
+	searchResult, err := tr.msgService.SearchMessages(ctx, agentName, query, msgOpts)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("search_messages failed: %s", err)), nil
 	}
 
 	return resultJSON(map[string]any{
-		"messages":     messages,
-		"count":        len(messages),
+		"messages":     searchResult.Messages,
+		"count":        len(searchResult.Messages),
+		"total":        searchResult.Total,
+		"offset":       searchResult.Offset,
+		"limit":        searchResult.Limit,
 		"search_mode":  "fulltext",
 	})
 }

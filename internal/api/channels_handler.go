@@ -221,7 +221,7 @@ func (h *ChannelsHandler) ChannelMessages(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	msgs, err := h.msgService.GetChannelMessages(r.Context(), ch.ID, limit)
+	paginated, err := h.msgService.GetChannelMessages(r.Context(), ch.ID, limit, 0)
 	if err != nil {
 		h.logger.Error("get channel messages failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to get messages"))
@@ -229,8 +229,8 @@ func (h *ChannelsHandler) ChannelMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"messages": msgs,
-		"total":    len(msgs),
+		"messages": paginated.Messages,
+		"total":    paginated.Total,
 	})
 }
 

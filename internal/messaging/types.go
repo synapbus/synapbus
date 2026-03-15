@@ -57,6 +57,14 @@ type DeadLetter struct {
 	CreatedAt         time.Time       `json:"created_at"`
 }
 
+// PaginatedMessages holds a page of messages with total count.
+type PaginatedMessages struct {
+	Messages []*Message `json:"messages"`
+	Total    int        `json:"total"`
+	Offset   int        `json:"offset"`
+	Limit    int        `json:"limit"`
+}
+
 // InboxState tracks per-agent, per-conversation read position.
 type InboxState struct {
 	AgentName         string    `json:"agent_name"`

@@ -319,13 +319,13 @@ func (ctr *ChannelToolRegistrar) handleGetChannelMessages(ctx context.Context, r
 		limit = 200
 	}
 
-	messages, err := ctr.msgService.GetChannelMessages(ctx, channelID, limit)
+	paginated, err := ctr.msgService.GetChannelMessages(ctx, channelID, limit, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("get_channel_messages failed: %s", err)), nil
 	}
 
-	result := make([]map[string]any, len(messages))
-	for i, msg := range messages {
+	result := make([]map[string]any, len(paginated.Messages))
+	for i, msg := range paginated.Messages {
 		result[i] = map[string]any{
 			"id":         msg.ID,
 			"from":       msg.FromAgent,
@@ -343,6 +343,7 @@ func (ctr *ChannelToolRegistrar) handleGetChannelMessages(ctx context.Context, r
 		"channel_id": channelID,
 		"messages":   result,
 		"count":      len(result),
+		"total":      paginated.Total,
 	})
 }
 

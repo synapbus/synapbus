@@ -266,6 +266,41 @@ func (s *SwarmService) ListTasks(ctx context.Context, channelID int64, status st
 	return s.taskStore.ListTasks(ctx, channelID, status)
 }
 
+// ListTasksPaginated returns tasks for a channel with pagination.
+func (s *SwarmService) ListTasksPaginated(ctx context.Context, channelID int64, status string, limit, offset int) (*PaginatedTasks, error) {
+	tasks, err := s.taskStore.ListTasks(ctx, channelID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	total := len(tasks)
+
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Apply pagination in memory (task lists are typically small)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	page := tasks[start:end]
+
+	return &PaginatedTasks{
+		Tasks:  page,
+		Total:  total,
+		Offset: offset,
+		Limit:  limit,
+	}, nil
+}
+
 // GetTaskWithBids returns a task and all its bids.
 func (s *SwarmService) GetTaskWithBids(ctx context.Context, taskID int64) (*Task, []*Bid, error) {
 	task, err := s.taskStore.GetTask(ctx, taskID)

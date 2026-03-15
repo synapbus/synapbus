@@ -534,3 +534,561 @@ func TestSQLiteMessageStore_AgentExists(t *testing.T) {
 		})
 	}
 }
+
+func TestSQLiteMessageStore_GetInboxMessages_Offset(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "reader")
+
+	conv := &Conversation{Subject: "offset test", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	// Insert 5 messages
+	for i := 0; i < 5; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "reader",
+			Body:           fmt.Sprintf("msg %d", i),
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	t.Run("offset=0 returns from beginning", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			Limit:       2,
+			Offset:      0,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(messages))
+		}
+	})
+
+	t.Run("offset=2 skips first 2", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			Limit:       2,
+			Offset:      2,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(messages))
+		}
+	})
+
+	t.Run("offset beyond total returns empty", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			Limit:       10,
+			Offset:      100,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 0 {
+			t.Errorf("got %d messages, want 0", len(messages))
+		}
+	})
+}
+
+func TestSQLiteMessageStore_CountInboxMessages(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "counter")
+
+	conv := &Conversation{Subject: "count test", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "counter",
+			Body:           "msg",
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	count, err := store.CountInboxMessages(ctx, "counter", ReadOptions{IncludeRead: true})
+	if err != nil {
+		t.Fatalf("CountInboxMessages: %v", err)
+	}
+	if count != 5 {
+		t.Errorf("count = %d, want 5", count)
+	}
+}
+
+func TestSQLiteMessageStore_SearchMessages_Offset(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "searcher")
+
+	conv := &Conversation{Subject: "search offset test", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "searcher",
+			Body:           fmt.Sprintf("unique message %d", i),
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	t.Run("offset=0 limit=2 returns first 2", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "searcher", "", SearchOptions{
+			Limit:  2,
+			Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("got %d results, want 2", len(results))
+		}
+	})
+
+	t.Run("offset=3 returns remaining 2", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "searcher", "", SearchOptions{
+			Limit:  10,
+			Offset: 3,
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("got %d results, want 2", len(results))
+		}
+	})
+
+	t.Run("offset beyond total returns empty", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "searcher", "", SearchOptions{
+			Limit:  10,
+			Offset: 100,
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("got %d results, want 0", len(results))
+		}
+	})
+}
+
+func TestSQLiteMessageStore_CountSearchMessages(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "searcher")
+
+	conv := &Conversation{Subject: "count search", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "searcher",
+			Body:           fmt.Sprintf("deployment issue %d", i),
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	count, err := store.CountSearchMessages(ctx, "searcher", "deployment", SearchOptions{})
+	if err != nil {
+		t.Fatalf("CountSearchMessages: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+
+	count, err = store.CountSearchMessages(ctx, "searcher", "", SearchOptions{})
+	if err != nil {
+		t.Fatalf("CountSearchMessages: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+}
+
+func TestSQLiteMessageStore_DateFiltering(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "reader")
+
+	conv := &Conversation{Subject: "date test", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	// Insert messages (all at "now" since SQLite uses CURRENT_TIMESTAMP)
+	for i := 0; i < 3; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "reader",
+			Body:           fmt.Sprintf("dated msg %d", i),
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	t.Run("after in the past returns all", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			IncludeRead: true,
+			After:       "2020-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 3 {
+			t.Errorf("got %d messages, want 3", len(messages))
+		}
+	})
+
+	t.Run("after in the future returns none", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			IncludeRead: true,
+			After:       "2099-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 0 {
+			t.Errorf("got %d messages, want 0", len(messages))
+		}
+	})
+
+	t.Run("before in the past returns none", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			IncludeRead: true,
+			Before:      "2020-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 0 {
+			t.Errorf("got %d messages, want 0", len(messages))
+		}
+	})
+
+	t.Run("before in the future returns all", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			IncludeRead: true,
+			Before:      "2099-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 3 {
+			t.Errorf("got %d messages, want 3", len(messages))
+		}
+	})
+
+	t.Run("combined after+before", func(t *testing.T) {
+		messages, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			IncludeRead: true,
+			After:       "2020-01-01T00:00:00Z",
+			Before:      "2099-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+		if len(messages) != 3 {
+			t.Errorf("got %d messages, want 3", len(messages))
+		}
+	})
+
+	t.Run("search date filtering", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "reader", "", SearchOptions{
+			After:  "2020-01-01T00:00:00Z",
+			Before: "2099-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 3 {
+			t.Errorf("got %d results, want 3", len(results))
+		}
+	})
+
+	t.Run("search after in the future returns none", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "reader", "", SearchOptions{
+			After: "2099-01-01T00:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("got %d results, want 0", len(results))
+		}
+	})
+}
+
+func TestSQLiteMessageStore_SearchMessages_ChannelFilter(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "agent-a")
+
+	// Create a channel
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO channels (id, name, description, topic, type, is_private, is_system, created_by, created_at, updated_at)
+		 VALUES (1, 'test-channel', '', '', 'standard', 0, 0, 'agent-a', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	// Add agent as member
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO channel_members (channel_id, agent_name, role, joined_at)
+		 VALUES (1, 'agent-a', 'owner', CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	conv := &Conversation{Subject: "channel test", CreatedBy: "agent-a"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	chID := int64(1)
+	// Insert a channel message
+	msg := &Message{
+		ConversationID: conv.ID,
+		FromAgent:      "agent-a",
+		ChannelID:      &chID,
+		Body:           "channel message",
+		Priority:       5,
+		Status:         StatusPending,
+	}
+	if err := store.InsertMessage(ctx, msg); err != nil {
+		t.Fatalf("InsertMessage: %v", err)
+	}
+
+	// Insert a DM (not in channel)
+	seedAgent(t, db, "agent-b")
+	convDM := &Conversation{Subject: "dm test", CreatedBy: "agent-a"}
+	if err := store.InsertConversation(ctx, convDM); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+	dmMsg := &Message{
+		ConversationID: convDM.ID,
+		FromAgent:      "agent-a",
+		ToAgent:        "agent-b",
+		Body:           "dm message",
+		Priority:       5,
+		Status:         StatusPending,
+	}
+	if err := store.InsertMessage(ctx, dmMsg); err != nil {
+		t.Fatalf("InsertMessage: %v", err)
+	}
+
+	t.Run("filter by channel name", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "agent-a", "", SearchOptions{
+			Channel: "test-channel",
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("got %d results, want 1", len(results))
+		}
+		if len(results) > 0 && results[0].Body != "channel message" {
+			t.Errorf("body = %q, want %q", results[0].Body, "channel message")
+		}
+	})
+
+	t.Run("non-existent channel returns empty", func(t *testing.T) {
+		results, err := store.SearchMessages(ctx, "agent-a", "", SearchOptions{
+			Channel: "no-such-channel",
+		})
+		if err != nil {
+			t.Fatalf("SearchMessages: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("got %d results, want 0", len(results))
+		}
+	})
+}
+
+func TestSQLiteMessageStore_GetChannelMessages_Offset(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "agent-a")
+
+	// Create a channel
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO channels (id, name, description, topic, type, is_private, is_system, created_by, created_at, updated_at)
+		 VALUES (1, 'offset-channel', '', '', 'standard', 0, 0, 'agent-a', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	conv := &Conversation{Subject: "ch offset", CreatedBy: "agent-a"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	chID := int64(1)
+	for i := 0; i < 5; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "agent-a",
+			ChannelID:      &chID,
+			Body:           fmt.Sprintf("ch msg %d", i),
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	t.Run("offset=0 limit=3", func(t *testing.T) {
+		messages, err := store.GetChannelMessages(ctx, 1, 3, 0)
+		if err != nil {
+			t.Fatalf("GetChannelMessages: %v", err)
+		}
+		if len(messages) != 3 {
+			t.Errorf("got %d messages, want 3", len(messages))
+		}
+	})
+
+	t.Run("offset=3 returns remaining", func(t *testing.T) {
+		messages, err := store.GetChannelMessages(ctx, 1, 10, 3)
+		if err != nil {
+			t.Fatalf("GetChannelMessages: %v", err)
+		}
+		if len(messages) != 2 {
+			t.Errorf("got %d messages, want 2", len(messages))
+		}
+	})
+
+	t.Run("count channel messages", func(t *testing.T) {
+		count, err := store.CountChannelMessages(ctx, 1)
+		if err != nil {
+			t.Fatalf("CountChannelMessages: %v", err)
+		}
+		if count != 5 {
+			t.Errorf("count = %d, want 5", count)
+		}
+	})
+}
+
+func TestSQLiteMessageStore_CombinedFiltersAndPagination(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "reader")
+
+	conv := &Conversation{Subject: "combined", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		msg := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "reader",
+			Body:           fmt.Sprintf("combined msg %d", i),
+			Priority:       5 + (i % 3),
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage: %v", err)
+		}
+	}
+
+	t.Run("filters + offset + limit", func(t *testing.T) {
+		// Get all with min_priority=6 first to know expected count
+		all, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			MinPriority: 6,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+
+		// Now paginate through
+		page1, err := store.GetInboxMessages(ctx, "reader", ReadOptions{
+			MinPriority: 6,
+			Limit:       2,
+			Offset:      0,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("GetInboxMessages: %v", err)
+		}
+
+		count, err := store.CountInboxMessages(ctx, "reader", ReadOptions{
+			MinPriority: 6,
+			IncludeRead: true,
+		})
+		if err != nil {
+			t.Fatalf("CountInboxMessages: %v", err)
+		}
+
+		if count != len(all) {
+			t.Errorf("count = %d, want %d", count, len(all))
+		}
+
+		if len(page1) > 2 {
+			t.Errorf("page1 got %d messages, want at most 2", len(page1))
+		}
+	})
+}

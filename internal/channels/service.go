@@ -311,13 +311,13 @@ func (s *Service) KickFromChannel(ctx context.Context, channelID int64, agentNam
 
 // ListChannels returns channels visible to the agent.
 func (s *Service) ListChannels(ctx context.Context, agentName string) ([]*ChannelWithCount, error) {
-	channels, err := s.store.ListChannels(ctx, agentName)
+	chList, err := s.store.ListChannels(ctx, agentName)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make([]*ChannelWithCount, len(channels))
-	for i, ch := range channels {
+	result := make([]*ChannelWithCount, len(chList))
+	for i, ch := range chList {
 		count, err := s.store.CountMembers(ctx, ch.ID)
 		if err != nil {
 			return nil, fmt.Errorf("count members for channel %d: %w", ch.ID, err)
@@ -335,6 +335,63 @@ func (s *Service) ListChannels(ctx context.Context, agentName string) ([]*Channe
 	}
 
 	return result, nil
+}
+
+// ListChannelsPaginated returns channels visible to the agent with pagination.
+func (s *Service) ListChannelsPaginated(ctx context.Context, agentName string, opts ListChannelsOptions) (*PaginatedChannels, error) {
+	allChannels, err := s.store.ListChannels(ctx, agentName)
+	if err != nil {
+		return nil, err
+	}
+
+	total := len(allChannels)
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Apply pagination
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	page := allChannels[start:end]
+
+	result := make([]*ChannelWithCount, len(page))
+	for i, ch := range page {
+		count, err := s.store.CountMembers(ctx, ch.ID)
+		if err != nil {
+			return nil, fmt.Errorf("count members for channel %d: %w", ch.ID, err)
+		}
+		result[i] = &ChannelWithCount{
+			Channel:     *ch,
+			MemberCount: count,
+		}
+	}
+
+	if s.tracer != nil {
+		s.tracer.Record(ctx, agentName, "channel.list", map[string]any{
+			"count": len(result),
+			"total": total,
+		})
+	}
+
+	return &PaginatedChannels{
+		Channels: result,
+		Total:    total,
+		Offset:   offset,
+		Limit:    limit,
+	}, nil
 }
 
 // GetChannel returns a channel by ID.
