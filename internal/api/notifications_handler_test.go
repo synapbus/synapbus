@@ -28,8 +28,8 @@ func setupNotificationsRouter(t *testing.T) (chi.Router, *messaging.MessagingSer
 	channelStore := channels.NewSQLiteChannelStore(db)
 	channelService := channels.NewService(channelStore, msgService, nil)
 
-	// Seed agents
-	seedTestAgent(t, db, "human-agent", 1)
+	// Seed agents — human-agent must be type 'human' for GetHumanAgentForUser
+	seedTestAgentWithType(t, db, "human-agent", "human", 1)
 	seedTestAgent(t, db, "bot-alice", 2)
 	seedTestAgent(t, db, "bot-bob", 2)
 

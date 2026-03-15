@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { onDestroy } from 'svelte';
 	import { channels as channelsApi, messages as messagesApi, agents as agentsApi } from '$lib/api/client';
 	import { openThread, closeThread } from '$lib/stores/thread';
 	import { notifications } from '$lib/stores/notifications';
@@ -61,12 +60,13 @@
 
 	function startMarkReadTimer() {
 		clearMarkReadTimer();
-		const unread = notifications.channelUnread(channelName);
-		if (unread > 0 && messageList.length > 0) {
+		if (lastReadMessageId !== null && messageList.length > 0) {
 			const lastMsgId = messageList[messageList.length - 1]?.id;
-			markReadTimer = setTimeout(() => {
-				notifications.markAsRead('channel', channelName, lastMsgId);
-			}, 2000);
+			if (lastMsgId > lastReadMessageId) {
+				markReadTimer = setTimeout(() => {
+					notifications.markAsRead('channel', channelName, lastMsgId);
+				}, 2000);
+			}
 		}
 	}
 
@@ -77,8 +77,9 @@
 		}
 	}
 
-	onDestroy(() => {
-		clearMarkReadTimer();
+	// Cleanup timer on component destroy
+	$effect(() => {
+		return () => clearMarkReadTimer();
 	});
 
 	function scrollToBottom() {

@@ -50,14 +50,10 @@ func (h *NotificationsHandler) UnreadCounts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ownedAgents, err := h.agentService.ListAgents(r.Context(), ownerID)
-	if err != nil {
-		h.logger.Error("list agents failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to list agents"))
-		return
-	}
-
-	if len(ownedAgents) == 0 {
+	// Use only the human agent's perspective for notification counts.
+	// This avoids system/AI agents inflating unread counts.
+	humanAgent, err := h.agentService.GetHumanAgentForUser(r.Context(), ownerID)
+	if err != nil || humanAgent == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"channels":     []channelUnread{},
 			"dms":          []dmUnread{},
@@ -66,63 +62,34 @@ func (h *NotificationsHandler) UnreadCounts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Aggregate channel summaries across all owned agents
-	channelMap := make(map[string]*channelUnread)
-	for _, agent := range ownedAgents {
-		if h.channelService == nil {
-			break
-		}
-		summaries, err := h.channelService.GetChannelSummaries(r.Context(), agent.Name)
+	// Channel summaries for the human agent
+	channelsList := []channelUnread{}
+	if h.channelService != nil {
+		summaries, err := h.channelService.GetChannelSummaries(r.Context(), humanAgent.Name)
 		if err != nil {
-			h.logger.Error("get channel summaries failed", "agent", agent.Name, "error", err)
-			continue
-		}
-		for _, cs := range summaries {
-			existing, ok := channelMap[cs.Name]
-			if !ok {
-				channelMap[cs.Name] = &channelUnread{
+			h.logger.Error("get channel summaries failed", "agent", humanAgent.Name, "error", err)
+		} else {
+			for _, cs := range summaries {
+				channelsList = append(channelsList, channelUnread{
 					Name:          cs.Name,
 					UnreadCount:   cs.UnreadCount,
 					LastMessageID: cs.LastMessageID,
-				}
-			} else {
-				// Take the max unread count (different agents may see different counts)
-				if cs.UnreadCount > existing.UnreadCount {
-					existing.UnreadCount = cs.UnreadCount
-				}
-				if cs.LastMessageID > existing.LastMessageID {
-					existing.LastMessageID = cs.LastMessageID
-				}
+				})
 			}
 		}
 	}
 
-	channelsList := make([]channelUnread, 0, len(channelMap))
-	for _, cu := range channelMap {
-		channelsList = append(channelsList, *cu)
-	}
-
-	// Aggregate DM unread counts across all owned agents
+	// DM unread counts for the human agent
 	dmMap := make(map[string]*dmUnread)
-	for _, agent := range ownedAgents {
-		counts, err := h.msgService.GetDMUnreadCounts(r.Context(), agent.Name)
-		if err != nil {
-			h.logger.Error("get dm unread counts failed", "agent", agent.Name, "error", err)
-			continue
-		}
+	counts, err := h.msgService.GetDMUnreadCounts(r.Context(), humanAgent.Name)
+	if err != nil {
+		h.logger.Error("get dm unread counts failed", "agent", humanAgent.Name, "error", err)
+	} else {
 		for _, dc := range counts {
-			existing, ok := dmMap[dc.Agent]
-			if !ok {
-				dmMap[dc.Agent] = &dmUnread{
-					Agent:         dc.Agent,
-					UnreadCount:   dc.UnreadCount,
-					LastMessageID: dc.LastMessageID,
-				}
-			} else {
-				existing.UnreadCount += dc.UnreadCount
-				if dc.LastMessageID > existing.LastMessageID {
-					existing.LastMessageID = dc.LastMessageID
-				}
+			dmMap[dc.Agent] = &dmUnread{
+				Agent:         dc.Agent,
+				UnreadCount:   dc.UnreadCount,
+				LastMessageID: dc.LastMessageID,
 			}
 		}
 	}
@@ -176,22 +143,13 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ownedAgents, err := h.agentService.ListAgents(r.Context(), ownerID)
-	if err != nil {
-		h.logger.Error("list agents failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to list agents"))
+	humanAgent, err := h.agentService.GetHumanAgentForUser(r.Context(), ownerID)
+	if err != nil || humanAgent == nil {
+		writeJSON(w, http.StatusBadRequest, errorBody("no_agents", "No human agent found"))
 		return
 	}
 
-	if len(ownedAgents) == 0 {
-		writeJSON(w, http.StatusBadRequest, errorBody("no_agents", "No agents registered"))
-		return
-	}
-
-	agentNames := make([]string, len(ownedAgents))
-	for i, a := range ownedAgents {
-		agentNames[i] = a.Name
-	}
+	agentNames := []string{humanAgent.Name}
 
 	if req.Type == "channel" {
 		if h.channelService == nil {
@@ -205,7 +163,6 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// Get conversation IDs for messages in this channel up to the given message ID
 		convIDs, err := h.msgService.GetConversationIDsForChannel(r.Context(), ch.ID, req.LastMessageID)
 		if err != nil {
 			h.logger.Error("get conversation ids failed", "error", err)
@@ -213,16 +170,13 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// Update inbox state for all owned agents on all relevant conversations
-		for _, agentName := range agentNames {
-			for _, convID := range convIDs {
-				if err := h.msgService.UpdateInboxState(r.Context(), agentName, convID, req.LastMessageID); err != nil {
-					h.logger.Error("update inbox state failed",
-						"agent", agentName,
-						"conversation_id", convID,
-						"error", err,
-					)
-				}
+		for _, convID := range convIDs {
+			if err := h.msgService.UpdateInboxState(r.Context(), humanAgent.Name, convID, req.LastMessageID); err != nil {
+				h.logger.Error("update inbox state failed",
+					"agent", humanAgent.Name,
+					"conversation_id", convID,
+					"error", err,
+				)
 			}
 		}
 	} else {
@@ -234,15 +188,13 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		for _, agentName := range agentNames {
-			for _, convID := range convIDs {
-				if err := h.msgService.UpdateInboxState(r.Context(), agentName, convID, req.LastMessageID); err != nil {
-					h.logger.Error("update inbox state failed",
-						"agent", agentName,
-						"conversation_id", convID,
-						"error", err,
-					)
-				}
+		for _, convID := range convIDs {
+			if err := h.msgService.UpdateInboxState(r.Context(), humanAgent.Name, convID, req.LastMessageID); err != nil {
+				h.logger.Error("update inbox state failed",
+					"agent", humanAgent.Name,
+					"conversation_id", convID,
+					"error", err,
+				)
 			}
 		}
 	}

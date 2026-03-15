@@ -513,9 +513,13 @@ func (h *MessagesHandler) DMMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Include last_read_message_id for the human agent's DM with the peer
+	lastRead, _ := h.msgService.GetLastReadForDM(r.Context(), agentNames, peerAgent)
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"messages": msgs,
-		"total":    len(msgs),
+		"messages":             msgs,
+		"total":                len(msgs),
+		"last_read_message_id": lastRead,
 	})
 }
 

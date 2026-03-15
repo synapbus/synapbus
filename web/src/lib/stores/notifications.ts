@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 export interface UnreadCounts {
 	channels: Map<string, number>;
@@ -28,30 +28,25 @@ function createNotificationStore() {
 			try {
 				const res = await fetch('/api/notifications/unread', { credentials: 'same-origin' });
 				if (!res.ok) return;
-				const data: { channels?: Record<string, number>; dms?: Record<string, number> } = await res.json();
-				const channels = new Map(Object.entries(data.channels ?? {}));
-				const dms = new Map(Object.entries(data.dms ?? {}));
+				const data = await res.json();
+				const channels = new Map<string, number>();
+				const dms = new Map<string, number>();
+				if (Array.isArray(data.channels)) {
+					for (const ch of data.channels) {
+						if (ch.unread_count > 0) channels.set(ch.name, ch.unread_count);
+					}
+				}
+				if (Array.isArray(data.dms)) {
+					for (const dm of data.dms) {
+						if (dm.unread_count > 0) dms.set(dm.agent, dm.unread_count);
+					}
+				}
 				const counts: UnreadCounts = { channels, dms, totalUnread: 0 };
 				counts.totalUnread = recalcTotal(counts);
 				set(counts);
 			} catch {
 				// API may not be available yet — silently ignore
 			}
-		},
-
-		/** Get unread count for a channel */
-		channelUnread(name: string): number {
-			return get({ subscribe }).channels.get(name) ?? 0;
-		},
-
-		/** Get unread count for a DM agent */
-		dmUnread(name: string): number {
-			return get({ subscribe }).dms.get(name) ?? 0;
-		},
-
-		/** Get total unread count */
-		get totalUnread(): number {
-			return get({ subscribe }).totalUnread;
 		},
 
 		/** Increment unread count for a channel or DM */
