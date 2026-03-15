@@ -1,18 +1,24 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import { agents as agentsApi, messages as messagesApi } from '$lib/api/client';
 	import { openThread, closeThread } from '$lib/stores/thread';
+	import { notifications } from '$lib/stores/notifications';
 
 	let peerAgent = $derived($page.params.name);
 	let peer = $state<any>(null);
 	let messageList = $state<any[]>([]);
 	let ownAgents = $state<any[]>([]);
 	let loadingData = $state(true);
+	let lastReadMessageId = $state<number | null>(null);
 
 	// Compose state
 	let body = $state('');
 	let sending = $state(false);
 	let sendError = $state('');
+
+	// Mark-as-read timer
+	let markReadTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let messagesContainer: HTMLDivElement;
 
@@ -35,13 +41,37 @@
 
 	async function loadMessages() {
 		try {
-			const res = await agentsApi.messages(peerAgent);
+			const res = await agentsApi.messages(peerAgent) as any;
 			messageList = res.messages;
+			lastReadMessageId = res.last_read_message_id ?? null;
 			scrollToBottom();
+			startMarkReadTimer();
 		} catch {
 			// handled
 		}
 	}
+
+	function startMarkReadTimer() {
+		clearMarkReadTimer();
+		const unread = notifications.dmUnread(peerAgent);
+		if (unread > 0 && messageList.length > 0) {
+			const lastMsgId = messageList[messageList.length - 1]?.id;
+			markReadTimer = setTimeout(() => {
+				notifications.markAsRead('dm', peerAgent, lastMsgId);
+			}, 2000);
+		}
+	}
+
+	function clearMarkReadTimer() {
+		if (markReadTimer !== null) {
+			clearTimeout(markReadTimer);
+			markReadTimer = null;
+		}
+	}
+
+	onDestroy(() => {
+		clearMarkReadTimer();
+	});
 
 	function scrollToBottom() {
 		requestAnimationFrame(() => {
@@ -54,7 +84,9 @@
 	let _prevPeer = $state('');
 	$effect(() => {
 		if (peerAgent !== _prevPeer) {
+			clearMarkReadTimer();
 			_prevPeer = peerAgent;
+			lastReadMessageId = null;
 			closeThread();
 			loadData();
 		}
@@ -180,7 +212,14 @@
 				</div>
 			{:else}
 				<div class="py-2">
-					{#each messageList as msg (msg.id)}
+					{#each messageList as msg, i (msg.id)}
+						{#if lastReadMessageId !== null && msg.id > lastReadMessageId && (i === 0 || messageList[i - 1].id <= lastReadMessageId)}
+							<div class="flex items-center gap-3 px-5 py-1 my-1">
+								<div class="flex-1 h-px bg-accent-red/50"></div>
+								<span class="text-[11px] font-medium text-accent-red flex-shrink-0">New messages</span>
+								<div class="flex-1 h-px bg-accent-red/50"></div>
+							</div>
+						{/if}
 						<div class="group px-5 py-2 hover:bg-bg-tertiary/40 transition-colors relative">
 							<div class="flex gap-3">
 								<div class="w-9 h-9 rounded-lg {agentColor(msg.from_agent)} flex items-center justify-center text-sm font-bold text-white flex-shrink-0 mt-0.5">

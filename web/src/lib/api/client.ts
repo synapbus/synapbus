@@ -188,4 +188,12 @@ export const apiKeys = {
 	get: (id: number) => request<any>('GET', `/api/keys/${id}`)
 };
 
+// Notifications
+export const notificationsApi = {
+	unread: () =>
+		request<{ channels: Record<string, number>; dms: Record<string, number> }>('GET', '/api/notifications/unread'),
+	markRead: (type: 'channel' | 'dm', target: string, lastMessageId?: number) =>
+		request<{ status: string }>('POST', '/api/notifications/mark-read', { type, target, last_message_id: lastMessageId })
+};
+
 export { ApiError };

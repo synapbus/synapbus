@@ -72,3 +72,10 @@ type InboxState struct {
 	LastReadMessageID int64     `json:"last_read_message_id"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
+
+// DMUnreadCount holds the unread DM count for a specific peer agent.
+type DMUnreadCount struct {
+	Agent         string `json:"agent"`
+	UnreadCount   int    `json:"unread_count"`
+	LastMessageID int64  `json:"last_message_id"`
+}

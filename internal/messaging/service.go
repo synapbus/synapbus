@@ -459,6 +459,36 @@ func (s *MessagingService) GetDMMessages(ctx context.Context, ownedAgents []stri
 	return messages, nil
 }
 
+// GetDMUnreadCounts returns unread DM counts grouped by peer agent.
+func (s *MessagingService) GetDMUnreadCounts(ctx context.Context, agentName string) ([]DMUnreadCount, error) {
+	return s.store.GetDMUnreadCounts(ctx, agentName)
+}
+
+// GetLastReadForChannel returns the last_read_message_id for an agent in a channel.
+func (s *MessagingService) GetLastReadForChannel(ctx context.Context, agentName string, channelID int64) (int64, error) {
+	return s.store.GetLastReadForChannel(ctx, agentName, channelID)
+}
+
+// GetLastReadForDM returns the last_read_message_id for owned agents in a DM with a peer.
+func (s *MessagingService) GetLastReadForDM(ctx context.Context, agentNames []string, peerAgent string) (int64, error) {
+	return s.store.GetLastReadForDM(ctx, agentNames, peerAgent)
+}
+
+// UpdateInboxState updates the read position for an agent in a conversation.
+func (s *MessagingService) UpdateInboxState(ctx context.Context, agentName string, conversationID int64, lastReadMsgID int64) error {
+	return s.store.UpdateInboxState(ctx, agentName, conversationID, lastReadMsgID)
+}
+
+// GetConversationIDsForChannel returns conversation IDs in a channel with messages up to lastMessageID.
+func (s *MessagingService) GetConversationIDsForChannel(ctx context.Context, channelID int64, lastMessageID int64) ([]int64, error) {
+	return s.store.GetConversationIDsForChannel(ctx, channelID, lastMessageID)
+}
+
+// GetConversationIDsForDM returns conversation IDs for DMs between owned agents and a peer.
+func (s *MessagingService) GetConversationIDsForDM(ctx context.Context, agentNames []string, peerAgent string, lastMessageID int64) ([]int64, error) {
+	return s.store.GetConversationIDsForDM(ctx, agentNames, peerAgent, lastMessageID)
+}
+
 // GetConversation returns a conversation and its messages.
 func (s *MessagingService) GetConversation(ctx context.Context, id int64) (*Conversation, []*Message, error) {
 	conv, err := s.store.GetConversation(ctx, id)

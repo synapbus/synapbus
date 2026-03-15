@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { user, logout } from '$lib/stores/auth';
+	import { notifications } from '$lib/stores/notifications';
 	import { channels as channelsApi, agents as agentsApi, deadLetters as deadLettersApi } from '$lib/api/client';
 
 	let channelList = $state<any[]>([]);
@@ -42,6 +43,10 @@
 	async function handleLogout() {
 		await logout();
 		goto('/login');
+	}
+
+	function badgeText(count: number): string {
+		return count > 99 ? '99+' : String(count);
 	}
 
 	const adminLinks = [
@@ -152,6 +157,7 @@
 						<p class="px-3 py-1 text-xs text-text-secondary italic">No channels</p>
 					{:else}
 						{#each channelList as ch}
+							{@const chUnread = $notifications.channels.get(ch.name) ?? 0}
 							<a
 								href="/channels/{ch.name}"
 								class="sidebar-item {isActive('/channels/' + ch.name) ? 'sidebar-item-active' : ''}"
@@ -160,15 +166,18 @@
 									<svg class="w-4 h-4 flex-shrink-0 text-accent-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
 										<path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
 									</svg>
-									<span class="truncate">My Agents</span>
+									<span class="truncate {chUnread > 0 ? 'font-bold text-text-primary' : ''}">My Agents</span>
 								{:else}
 									<span class="text-text-secondary font-mono text-xs">#</span>
-									<span class="truncate">{ch.name}</span>
+									<span class="truncate {chUnread > 0 ? 'font-bold text-text-primary' : ''}">{ch.name}</span>
 								{/if}
 								{#if ch.is_private && !ch.name.startsWith('my-agents-')}
-									<svg class="w-3 h-3 text-text-secondary ml-auto flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+									<svg class="w-3 h-3 text-text-secondary {chUnread > 0 ? '' : 'ml-auto'} flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
 										<path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
 									</svg>
+								{/if}
+								{#if chUnread > 0}
+									<span class="ml-auto text-[10px] font-bold text-white bg-accent-red px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex-shrink-0">{badgeText(chUnread)}</span>
 								{/if}
 							</a>
 						{/each}
@@ -196,6 +205,7 @@
 						<p class="px-3 py-1 text-xs text-text-secondary italic">No agents</p>
 					{:else}
 						{#each agentList as agent}
+							{@const dmUnread = $notifications.dms.get(agent.name) ?? 0}
 							<a
 								href="/dm/{agent.name}"
 								class="sidebar-item {isActive('/dm/' + agent.name) ? 'sidebar-item-active' : ''}"
@@ -208,9 +218,11 @@
 										class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-bg-secondary {agent.status === 'active' ? 'bg-accent-green' : 'bg-text-secondary'}"
 									></span>
 								</span>
-								<span class="truncate">{agent.display_name || agent.name}</span>
+								<span class="truncate {dmUnread > 0 ? 'font-bold text-text-primary' : ''}">{agent.display_name || agent.name}</span>
 								<span class="text-[9px] text-text-secondary flex-shrink-0">(you)</span>
-								{#if agent.type === 'ai'}
+								{#if dmUnread > 0}
+									<span class="ml-auto text-[10px] font-bold text-white bg-accent-red px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex-shrink-0">{badgeText(dmUnread)}</span>
+								{:else if agent.type === 'ai'}
 									<span class="ml-auto text-[9px] font-mono text-accent-purple bg-accent-purple/10 px-1 rounded flex-shrink-0">AI</span>
 								{/if}
 							</a>

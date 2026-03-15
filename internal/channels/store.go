@@ -381,6 +381,7 @@ func (s *SQLiteChannelStore) GetChannelSummaries(ctx context.Context, agentName 
 		                WHERE ist.agent_name = ? AND ist.conversation_id = m.conversation_id), 0)
 		           AND m.from_agent != ?
 		        ) AS unread_count,
+		        COALESCE((SELECT MAX(m3.id) FROM messages m3 WHERE m3.channel_id = c.id), 0) AS last_message_id,
 		        (SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.channel_id = c.id) AS last_message_at
 		 FROM channels c
 		 JOIN channel_members cm ON cm.channel_id = c.id AND cm.agent_name = ?
@@ -396,7 +397,7 @@ func (s *SQLiteChannelStore) GetChannelSummaries(ctx context.Context, agentName 
 	for rows.Next() {
 		var cs ChannelSummary
 		var lastMsg sql.NullString
-		if err := rows.Scan(&cs.ID, &cs.Name, &cs.UnreadCount, &lastMsg); err != nil {
+		if err := rows.Scan(&cs.ID, &cs.Name, &cs.UnreadCount, &cs.LastMessageID, &lastMsg); err != nil {
 			return nil, fmt.Errorf("scan channel summary: %w", err)
 		}
 		if lastMsg.Valid {

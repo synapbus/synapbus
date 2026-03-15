@@ -18,7 +18,13 @@ import (
 type MessagesHandler struct {
 	msgService   *messaging.MessagingService
 	agentService *agents.AgentService
+	broadcaster  *SSEBroadcaster
 	logger       *slog.Logger
+}
+
+// SetBroadcaster sets the event broadcaster for real-time SSE notifications.
+func (h *MessagesHandler) SetBroadcaster(b *SSEBroadcaster) {
+	h.broadcaster = b
 }
 
 // NewMessagesHandler creates a new messages handler.
@@ -307,6 +313,24 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("send message failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, errorBody("send_failed", err.Error()))
 		return
+	}
+
+	// Broadcast real-time event to connected SSE clients
+	if h.broadcaster != nil {
+		event := NewMessageEvent{
+			MessageID: msg.ID,
+			FromAgent: msg.FromAgent,
+			ToAgent:   msg.ToAgent,
+		}
+		if msg.ChannelID != nil && h.broadcaster.channelService != nil {
+			ch, chErr := h.broadcaster.channelService.GetChannel(r.Context(), *msg.ChannelID)
+			if chErr == nil {
+				event.Channel = ch.Name
+			}
+			h.broadcaster.BroadcastChannelMessage(r.Context(), *msg.ChannelID, event)
+		} else {
+			h.broadcaster.BroadcastDM(r.Context(), event)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, msg)

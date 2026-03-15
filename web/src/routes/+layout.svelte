@@ -4,15 +4,35 @@
 	import { goto } from '$app/navigation';
 	import { checkAuth, user, loading } from '$lib/stores/auth';
 	import { SSEClient } from '$lib/api/sse';
+	import { notifications } from '$lib/stores/notifications';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Header from '$lib/components/Header.svelte';
 	import ThreadPanel from '$lib/components/ThreadPanel.svelte';
 
 	let { children } = $props();
 	let sseClient: SSEClient | null = $state(null);
+	let sseUnsubscribe: (() => void) | null = $state(null);
 	let initialized = $state(false);
 
 	let isLoginPage = $derived($page.url.pathname === '/login');
+
+	function setupNotifications(client: SSEClient) {
+		notifications.initialize();
+		return client.onEvent((event) => {
+			if (event.type === 'new_message') {
+				const d = event.data;
+				if (d.channel_name) {
+					notifications.incrementUnread('channel', d.channel_name);
+				} else if (d.from_agent) {
+					notifications.incrementUnread('dm', d.from_agent);
+				}
+			} else if (event.type === 'unread_update') {
+				const d = event.data;
+				const type = d.type === 'channel' ? 'channel' : 'dm';
+				notifications.setUnread(type as 'channel' | 'dm', d.target, d.count ?? 0);
+			}
+		});
+	}
 
 	$effect(() => {
 		if (!initialized) {
@@ -23,6 +43,7 @@
 				} else if (authenticated) {
 					sseClient = new SSEClient();
 					sseClient.connect();
+					sseUnsubscribe = setupNotifications(sseClient);
 				}
 			});
 		}
@@ -36,7 +57,9 @@
 
 	$effect(() => {
 		return () => {
+			sseUnsubscribe?.();
 			sseClient?.disconnect();
+			notifications.reset();
 		};
 	});
 </script>

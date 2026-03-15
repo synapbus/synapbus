@@ -16,6 +16,7 @@ type ChannelSummary struct {
 	ID            int64      `json:"id"`
 	Name          string     `json:"name"`
 	UnreadCount   int        `json:"unread"`
+	LastMessageID int64      `json:"last_message_id"`
 	LastMessageAt *time.Time `json:"last_message_at"`
 }
 

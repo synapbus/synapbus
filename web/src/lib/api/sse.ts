@@ -26,7 +26,7 @@ export class SSEClient {
 		};
 
 		// Listen for typed events
-		const eventTypes = ['connected', 'new_message', 'message_updated', 'agent_connected', 'agent_disconnected', 'heartbeat'];
+		const eventTypes = ['connected', 'new_message', 'message_updated', 'agent_connected', 'agent_disconnected', 'heartbeat', 'unread_update'];
 		for (const type of eventTypes) {
 			this.eventSource.addEventListener(type, (e: MessageEvent) => {
 				try {

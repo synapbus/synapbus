@@ -85,6 +85,13 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 	if cfg.MsgService != nil && cfg.AgentService != nil {
 		messagesHandler := NewMessagesHandler(cfg.MsgService, cfg.AgentService)
 		agentsHandler := NewAgentsHandler(cfg.AgentService, cfg.TraceStore, cfg.ChannelService)
+		notificationsHandler := NewNotificationsHandler(cfg.MsgService, cfg.AgentService, cfg.ChannelService)
+
+		// Wire up SSE broadcaster for real-time events
+		if cfg.SSEHub != nil {
+			broadcaster := NewSSEBroadcaster(cfg.SSEHub, cfg.AgentService, cfg.ChannelService)
+			messagesHandler.SetBroadcaster(broadcaster)
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware)
@@ -109,6 +116,10 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Delete("/api/agents/{name}", agentsHandler.DeleteAgent)
 			r.Post("/api/agents/{name}/revoke-key", agentsHandler.RevokeKey)
 			r.Get("/api/agents/{name}/messages", messagesHandler.DMMessages)
+
+			// Notifications
+			r.Get("/api/notifications/unread", notificationsHandler.UnreadCounts)
+			r.Post("/api/notifications/mark-read", notificationsHandler.MarkRead)
 		})
 
 		// API Keys

@@ -201,7 +201,7 @@ func (h *ChannelsHandler) JoinChannel(w http.ResponseWriter, r *http.Request) {
 
 // ChannelMessages handles GET /api/channels/{name}/messages.
 func (h *ChannelsHandler) ChannelMessages(w http.ResponseWriter, r *http.Request) {
-	_, ok := OwnerIDFromContext(r.Context())
+	ownerID, ok := OwnerIDFromContext(r.Context())
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, errorBody("unauthorized", "Authentication required"))
 		return
@@ -228,9 +228,22 @@ func (h *ChannelsHandler) ChannelMessages(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Compute last_read_message_id across owned agents
+	var lastReadMessageID int64
+	ownedAgents, err := h.agentService.ListAgents(r.Context(), ownerID)
+	if err == nil {
+		for _, agent := range ownedAgents {
+			lr, err := h.msgService.GetLastReadForChannel(r.Context(), agent.Name, ch.ID)
+			if err == nil && lr > lastReadMessageID {
+				lastReadMessageID = lr
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"messages": paginated.Messages,
-		"total":    paginated.Total,
+		"messages":             paginated.Messages,
+		"total":                paginated.Total,
+		"last_read_message_id": lastReadMessageID,
 	})
 }
 

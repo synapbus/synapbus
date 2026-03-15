@@ -34,6 +34,11 @@ type MessageStore interface {
 	GetPendingDMs(ctx context.Context, agentName string, limit int) ([]*Message, error)
 	GetRecentMentions(ctx context.Context, agentName string, limit int) ([]*Message, error)
 	GetSystemNotifications(ctx context.Context, agentName string, limit int) ([]*Message, error)
+	GetDMUnreadCounts(ctx context.Context, agentName string) ([]DMUnreadCount, error)
+	GetLastReadForChannel(ctx context.Context, agentName string, channelID int64) (int64, error)
+	GetLastReadForDM(ctx context.Context, agentNames []string, peerAgent string) (int64, error)
+	GetConversationIDsForChannel(ctx context.Context, channelID int64, lastMessageID int64) ([]int64, error)
+	GetConversationIDsForDM(ctx context.Context, agentNames []string, peerAgent string, lastMessageID int64) ([]int64, error)
 }
 
 // SQLiteMessageStore implements MessageStore using SQLite.
@@ -771,6 +776,184 @@ func scanMessageFromRows(rows *sql.Rows) (*Message, error) {
 	msg.Metadata = json.RawMessage(metadata)
 
 	return &msg, nil
+}
+
+// GetDMUnreadCounts returns unread DM counts grouped by peer agent.
+// For each unique from_agent that has sent DMs to agentName, it computes
+// how many messages have id > last_read_message_id (from inbox_state).
+func (s *SQLiteMessageStore) GetDMUnreadCounts(ctx context.Context, agentName string) ([]DMUnreadCount, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT
+			m.from_agent,
+			COUNT(CASE WHEN m.id > COALESCE(
+				(SELECT ist.last_read_message_id FROM inbox_state ist
+				 WHERE ist.agent_name = ? AND ist.conversation_id = m.conversation_id), 0)
+			THEN 1 END) AS unread_count,
+			MAX(m.id) AS last_message_id
+		 FROM messages m
+		 WHERE m.to_agent = ?
+		   AND m.channel_id IS NULL
+		   AND m.from_agent != 'system'
+		 GROUP BY m.from_agent
+		 ORDER BY m.from_agent`,
+		agentName, agentName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get dm unread counts: %w", err)
+	}
+	defer rows.Close()
+
+	var results []DMUnreadCount
+	for rows.Next() {
+		var d DMUnreadCount
+		if err := rows.Scan(&d.Agent, &d.UnreadCount, &d.LastMessageID); err != nil {
+			return nil, fmt.Errorf("scan dm unread count: %w", err)
+		}
+		results = append(results, d)
+	}
+	if results == nil {
+		results = []DMUnreadCount{}
+	}
+	return results, rows.Err()
+}
+
+// GetLastReadForChannel returns the effective last_read_message_id for an agent
+// across all conversations in a given channel.
+func (s *SQLiteMessageStore) GetLastReadForChannel(ctx context.Context, agentName string, channelID int64) (int64, error) {
+	var lastRead sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(COALESCE(ist.last_read_message_id, 0))
+		 FROM (SELECT DISTINCT conversation_id FROM messages WHERE channel_id = ?) conv
+		 LEFT JOIN inbox_state ist ON ist.conversation_id = conv.conversation_id AND ist.agent_name = ?`,
+		channelID, agentName,
+	).Scan(&lastRead)
+	if err != nil {
+		return 0, fmt.Errorf("get last read for channel: %w", err)
+	}
+	if lastRead.Valid {
+		return lastRead.Int64, nil
+	}
+	return 0, nil
+}
+
+// GetLastReadForDM returns the effective last_read_message_id for an owned agent
+// in DM conversations with a specific peer agent.
+func (s *SQLiteMessageStore) GetLastReadForDM(ctx context.Context, agentNames []string, peerAgent string) (int64, error) {
+	if len(agentNames) == 0 {
+		return 0, nil
+	}
+
+	placeholders := make([]string, len(agentNames))
+	args := make([]any, 0, len(agentNames)*2+1)
+	for i, a := range agentNames {
+		placeholders[i] = "?"
+		args = append(args, a)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	// Find conversations between owned agents and peer agent (DMs only)
+	// and get the max last_read_message_id
+	query := fmt.Sprintf(
+		`SELECT COALESCE(MAX(ist.last_read_message_id), 0)
+		 FROM inbox_state ist
+		 WHERE ist.agent_name IN (%s)
+		   AND ist.conversation_id IN (
+			 SELECT DISTINCT m.conversation_id FROM messages m
+			 WHERE m.channel_id IS NULL
+			   AND ((m.from_agent IN (%s) AND m.to_agent = ?)
+			     OR (m.from_agent = ? AND m.to_agent IN (%s)))
+		   )`,
+		inClause, inClause, inClause,
+	)
+	for _, a := range agentNames {
+		args = append(args, a)
+	}
+	args = append(args, peerAgent, peerAgent)
+	for _, a := range agentNames {
+		args = append(args, a)
+	}
+
+	var lastRead int64
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&lastRead)
+	if err != nil {
+		return 0, fmt.Errorf("get last read for dm: %w", err)
+	}
+	return lastRead, nil
+}
+
+// GetConversationIDsForChannel returns conversation IDs in a channel with messages up to lastMessageID.
+func (s *SQLiteMessageStore) GetConversationIDsForChannel(ctx context.Context, channelID int64, lastMessageID int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT conversation_id FROM messages
+		 WHERE channel_id = ? AND id <= ?`,
+		channelID, lastMessageID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation ids for channel: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan conversation id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// GetConversationIDsForDM returns conversation IDs for DMs between owned agents and a peer agent,
+// with messages up to lastMessageID.
+func (s *SQLiteMessageStore) GetConversationIDsForDM(ctx context.Context, agentNames []string, peerAgent string, lastMessageID int64) ([]int64, error) {
+	if len(agentNames) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(agentNames))
+	args := make([]any, 0, len(agentNames)*2+2)
+	for i, a := range agentNames {
+		placeholders[i] = "?"
+		args = append(args, a)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	query := fmt.Sprintf(
+		`SELECT DISTINCT conversation_id FROM messages
+		 WHERE channel_id IS NULL
+		   AND id <= ?
+		   AND ((from_agent IN (%s) AND to_agent = ?)
+		     OR (from_agent = ? AND to_agent IN (%s)))`,
+		inClause, inClause,
+	)
+
+	// Reorder args: agentNames for first IN, lastMessageID, agentNames for second IN...
+	finalArgs := make([]any, 0, len(agentNames)*2+3)
+	finalArgs = append(finalArgs, lastMessageID)
+	for _, a := range agentNames {
+		finalArgs = append(finalArgs, a)
+	}
+	finalArgs = append(finalArgs, peerAgent, peerAgent)
+	for _, a := range agentNames {
+		finalArgs = append(finalArgs, a)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, finalArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation ids for dm: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan conversation id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // scanMessage scans a single message from sql.Row.
