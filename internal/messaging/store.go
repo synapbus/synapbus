@@ -492,6 +492,57 @@ func (s *SQLiteMessageStore) buildSearchConditions(agentName, query string, opts
 		args = append(args, opts.Channel)
 	}
 
+	if len(opts.Channels) > 0 {
+		placeholders := make([]string, len(opts.Channels))
+		for i, ch := range opts.Channels {
+			placeholders[i] = "?"
+			args = append(args, ch)
+		}
+		conditions = append(conditions, fmt.Sprintf("m.channel_id IN (SELECT id FROM channels WHERE LOWER(name) IN (%s))", strings.Join(placeholders, ",")))
+	}
+
+	if len(opts.ExcludeChannels) > 0 {
+		placeholders := make([]string, len(opts.ExcludeChannels))
+		for i, ch := range opts.ExcludeChannels {
+			placeholders[i] = "?"
+			args = append(args, ch)
+		}
+		conditions = append(conditions, fmt.Sprintf("(m.channel_id IS NULL OR m.channel_id NOT IN (SELECT id FROM channels WHERE LOWER(name) IN (%s)))", strings.Join(placeholders, ",")))
+	}
+
+	if len(opts.Agents) > 0 {
+		placeholders := make([]string, len(opts.Agents))
+		for i, a := range opts.Agents {
+			placeholders[i] = "?"
+			args = append(args, a)
+		}
+		inClause := strings.Join(placeholders, ",")
+		// Clone placeholders for the second IN clause
+		placeholders2 := make([]string, len(opts.Agents))
+		for i, a := range opts.Agents {
+			placeholders2[i] = "?"
+			args = append(args, a)
+		}
+		inClause2 := strings.Join(placeholders2, ",")
+		conditions = append(conditions, fmt.Sprintf("(m.from_agent IN (%s) OR m.to_agent IN (%s))", inClause, inClause2))
+	}
+
+	if len(opts.ExcludeAgents) > 0 {
+		placeholders := make([]string, len(opts.ExcludeAgents))
+		for i, a := range opts.ExcludeAgents {
+			placeholders[i] = "?"
+			args = append(args, a)
+		}
+		inClause := strings.Join(placeholders, ",")
+		placeholders2 := make([]string, len(opts.ExcludeAgents))
+		for i, a := range opts.ExcludeAgents {
+			placeholders2[i] = "?"
+			args = append(args, a)
+		}
+		inClause2 := strings.Join(placeholders2, ",")
+		conditions = append(conditions, fmt.Sprintf("m.from_agent NOT IN (%s) AND (m.to_agent = '' OR m.to_agent NOT IN (%s))", inClause, inClause2))
+	}
+
 	if opts.After != "" {
 		if t, err := time.Parse(time.RFC3339, opts.After); err == nil {
 			conditions = append(conditions, "m.created_at >= ?")

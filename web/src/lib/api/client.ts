@@ -65,9 +65,13 @@ export const messages = {
 	send: (body: { from?: string; to?: string; body: string; priority?: number; subject?: string; channel_id?: number; conversation_id?: number; reply_to?: number }) =>
 		request<any>('POST', '/api/messages', body),
 	markDone: (id: number) => request<{ status: string }>('POST', `/api/messages/${id}/done`),
-	search: (q: string, limit?: number) => {
+	search: (q: string, opts?: { limit?: number; channel?: string; agent?: string; after?: string; before?: string }) => {
 		const qs = new URLSearchParams({ q });
-		if (limit) qs.set('limit', String(limit));
+		if (opts?.limit) qs.set('limit', String(opts.limit));
+		if (opts?.channel) qs.set('channel', opts.channel);
+		if (opts?.agent) qs.set('agent', opts.agent);
+		if (opts?.after) qs.set('after', opts.after);
+		if (opts?.before) qs.set('before', opts.before);
 		return request<{ messages: any[]; query: string; total: number }>('GET', `/api/messages/search?${qs}`);
 	}
 };

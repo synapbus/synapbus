@@ -25,14 +25,18 @@ type ReadOptions struct {
 
 // SearchOptions configures message search behavior.
 type SearchOptions struct {
-	FromAgent   string `json:"from_agent,omitempty"`
-	ToAgent     string `json:"to_agent,omitempty"`
-	ChannelID   *int64 `json:"channel_id,omitempty"`
-	MinPriority int    `json:"min_priority,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Limit       int    `json:"limit,omitempty"`
-	Offset      int    `json:"offset,omitempty"`
-	After       string `json:"after,omitempty"`
-	Before      string `json:"before,omitempty"`
-	Channel     string `json:"channel,omitempty"`
+	FromAgent       string   `json:"from_agent,omitempty"`
+	ToAgent         string   `json:"to_agent,omitempty"`
+	ChannelID       *int64   `json:"channel_id,omitempty"`
+	MinPriority     int      `json:"min_priority,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	Limit           int      `json:"limit,omitempty"`
+	Offset          int      `json:"offset,omitempty"`
+	After           string   `json:"after,omitempty"`
+	Before          string   `json:"before,omitempty"`
+	Channel         string   `json:"channel,omitempty"`
+	Channels        []string `json:"channels,omitempty"`         // include messages in these channels
+	ExcludeChannels []string `json:"exclude_channels,omitempty"` // exclude messages in these channels
+	Agents          []string `json:"agents,omitempty"`           // include messages from/to these agents
+	ExcludeAgents   []string `json:"exclude_agents,omitempty"`   // exclude messages from/to these agents
 }

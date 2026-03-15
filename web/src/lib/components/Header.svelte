@@ -16,7 +16,7 @@
 		const path = $page.url.pathname;
 		if (path === '/') return 'Dashboard';
 		if (path.startsWith('/conversations/')) return 'Thread';
-		if (path === '/conversations') return 'Conversations';
+		if (path === '/conversations') return 'Search';
 		if (path.startsWith('/channels/')) return '#' + ($page.params.name ?? '');
 		if (path === '/channels') return 'Channels';
 		if (path.startsWith('/dm/')) return ($page.params.name ?? 'DM');

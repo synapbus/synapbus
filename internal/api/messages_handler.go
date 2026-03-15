@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -399,9 +400,60 @@ func (h *MessagesHandler) SearchMessages(w http.ResponseWriter, r *http.Request)
 		limit = 20
 	}
 
+	// Parse advanced filter parameters
+	channelFilter := r.URL.Query().Get("channel")
+	agentFilter := r.URL.Query().Get("agent")
+	afterFilter := r.URL.Query().Get("after")
+	beforeFilter := r.URL.Query().Get("before")
+
 	var allMessages []*messaging.Message
 	for _, agent := range ownedAgents {
-		opts := messaging.SearchOptions{Limit: limit}
+		opts := messaging.SearchOptions{
+			Limit:  limit,
+			After:  afterFilter,
+			Before: beforeFilter,
+		}
+
+		// Apply channel filters (comma-separated, prefix with - to exclude)
+		if channelFilter != "" {
+			channels := strings.Split(channelFilter, ",")
+			var includeChannels []string
+			var excludeChannels []string
+			for _, ch := range channels {
+				ch = strings.TrimSpace(ch)
+				if ch == "" {
+					continue
+				}
+				if strings.HasPrefix(ch, "-") {
+					excludeChannels = append(excludeChannels, strings.TrimPrefix(ch, "-"))
+				} else {
+					includeChannels = append(includeChannels, ch)
+				}
+			}
+			opts.Channels = includeChannels
+			opts.ExcludeChannels = excludeChannels
+		}
+
+		// Apply agent filters (comma-separated, prefix with - to exclude)
+		if agentFilter != "" {
+			agentNames := strings.Split(agentFilter, ",")
+			var includeAgents []string
+			var excludeAgents []string
+			for _, a := range agentNames {
+				a = strings.TrimSpace(a)
+				if a == "" {
+					continue
+				}
+				if strings.HasPrefix(a, "-") {
+					excludeAgents = append(excludeAgents, strings.TrimPrefix(a, "-"))
+				} else {
+					includeAgents = append(includeAgents, a)
+				}
+			}
+			opts.Agents = includeAgents
+			opts.ExcludeAgents = excludeAgents
+		}
+
 		result, err := h.msgService.SearchMessages(r.Context(), agent.Name, query, opts)
 		if err != nil {
 			continue
