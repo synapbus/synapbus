@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { openThread } from '$lib/stores/thread';
+	import MessageBody from '$lib/components/MessageBody.svelte';
 
 	type Message = {
 		id: number;
@@ -105,7 +106,7 @@
 								<span class="badge bg-accent-yellow/20 text-accent-yellow">P{msg.priority}</span>
 							{/if}
 						</div>
-						<p class="text-sm text-text-primary/90 leading-relaxed whitespace-pre-wrap">{msg.body.length > 300 ? msg.body.slice(0, 300) + '...' : msg.body}</p>
+						<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} truncate={300} /></div>
 
 						<!-- Thread link -->
 						{#if showConversationLink && msg.conversation_id}

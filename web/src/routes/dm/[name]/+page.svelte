@@ -3,6 +3,7 @@
 	import { agents as agentsApi, messages as messagesApi } from '$lib/api/client';
 	import { openThread, closeThread } from '$lib/stores/thread';
 	import { notifications } from '$lib/stores/notifications';
+	import MessageBody from '$lib/components/MessageBody.svelte';
 
 	let peerAgent = $derived($page.params.name);
 	let peer = $state<any>(null);
@@ -244,7 +245,7 @@
 											<span class="text-[9px] px-1.5 py-0.5 rounded {msg.status === 'pending' ? 'bg-accent-yellow/20 text-accent-yellow' : msg.status === 'processing' ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-tertiary text-text-secondary'}">{msg.status}</span>
 										{/if}
 									</div>
-									<p class="text-sm text-text-primary/90 leading-relaxed whitespace-pre-wrap">{msg.body}</p>
+									<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
 									{#if msg.reply_count > 0}
 										<button
 											class="mt-1 flex items-center gap-1 text-xs text-accent-blue hover:underline"

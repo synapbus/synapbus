@@ -3,6 +3,7 @@
 	import { channels as channelsApi, messages as messagesApi, agents as agentsApi } from '$lib/api/client';
 	import { openThread, closeThread } from '$lib/stores/thread';
 	import { notifications } from '$lib/stores/notifications';
+	import MessageBody from '$lib/components/MessageBody.svelte';
 
 	let channel = $state<any>(null);
 	let members = $state<any[]>([]);
@@ -268,7 +269,7 @@
 												{/if}
 												<span class="text-xs text-text-secondary">{formatTime(msg.created_at)}</span>
 											</div>
-											<p class="text-sm text-text-primary/90 leading-relaxed whitespace-pre-wrap">{msg.body}</p>
+											<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
 											{#if msg.reply_count > 0}
 												<button
 													class="mt-1 flex items-center gap-1 text-xs text-accent-blue hover:underline"

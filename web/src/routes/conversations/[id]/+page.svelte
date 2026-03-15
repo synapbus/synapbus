@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { conversations as convsApi, messages as messagesApi } from '$lib/api/client';
+	import MessageBody from '$lib/components/MessageBody.svelte';
 
 	let conversation = $state<any>(null);
 	let messagesList = $state<any[]>([]);
@@ -151,7 +152,7 @@
 							{/if}
 								<span class="text-xs text-text-secondary ml-auto">{formatTime(msg.created_at)}</span>
 							</div>
-							<div class="text-sm text-text-primary/90 whitespace-pre-wrap leading-relaxed">{msg.body}</div>
+							<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
 						</div>
 					</div>
 				</div>

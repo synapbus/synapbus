@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { activeThread, closeThread } from '$lib/stores/thread';
 	import { conversations as convsApi, messages as messagesApi } from '$lib/api/client';
+	import MessageBody from '$lib/components/MessageBody.svelte';
 
 	let conversation = $state<any>(null);
 	let threadMessages = $state<any[]>([]);
@@ -162,7 +163,7 @@
 										<span class="{statusClass(msg.status)} text-[10px]">{msg.status}</span>
 									{/if}
 								</div>
-								<p class="text-xs text-text-primary/90 whitespace-pre-wrap leading-relaxed">{msg.body}</p>
+								<div class="text-xs text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
 							</div>
 						</div>
 					</div>
