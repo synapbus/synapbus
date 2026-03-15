@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // ChannelStore defines the storage interface for channel operations.
@@ -394,12 +395,16 @@ func (s *SQLiteChannelStore) GetChannelSummaries(ctx context.Context, agentName 
 	var summaries []ChannelSummary
 	for rows.Next() {
 		var cs ChannelSummary
-		var lastMsg sql.NullTime
+		var lastMsg sql.NullString
 		if err := rows.Scan(&cs.ID, &cs.Name, &cs.UnreadCount, &lastMsg); err != nil {
 			return nil, fmt.Errorf("scan channel summary: %w", err)
 		}
 		if lastMsg.Valid {
-			cs.LastMessageAt = &lastMsg.Time
+			if t, err := time.Parse("2006-01-02T15:04:05Z", lastMsg.String); err == nil {
+				cs.LastMessageAt = &t
+			} else if t, err := time.Parse("2006-01-02 15:04:05", lastMsg.String); err == nil {
+				cs.LastMessageAt = &t
+			}
 		}
 		summaries = append(summaries, cs)
 	}
