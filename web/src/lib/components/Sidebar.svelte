@@ -91,19 +91,6 @@
 		</button>
 	</div>
 
-	<!-- Search bar -->
-	<div class="px-3 py-2.5 flex-shrink-0">
-		<button
-			class="w-full flex items-center gap-2 px-2.5 py-1.5 bg-bg-tertiary rounded text-text-secondary text-xs hover:bg-bg-input transition-colors"
-			onclick={() => goto('/conversations')}
-		>
-			<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-				<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-			</svg>
-			Search messages
-		</button>
-	</div>
-
 	<!-- Scrollable nav -->
 	<nav class="flex-1 overflow-y-auto px-2 pb-3">
 		<!-- Dashboard -->
