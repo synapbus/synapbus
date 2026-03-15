@@ -471,13 +471,18 @@ func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAge
 		return nil, err
 	}
 
-	// Verify sender is a member
+	// Verify sender is a member; auto-join public channels on first send.
 	isMember, err := s.store.IsMember(ctx, channelID, fromAgent)
 	if err != nil {
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
 	if !isMember {
-		return nil, ErrNotChannelMember
+		if ch.IsPrivate {
+			return nil, ErrNotChannelMember
+		}
+		if err := s.JoinChannel(ctx, channelID, fromAgent); err != nil {
+			return nil, fmt.Errorf("auto-join public channel: %w", err)
+		}
 	}
 
 	// Get members for mentions and inbox notifications
@@ -526,10 +531,10 @@ func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAge
 		return nil, fmt.Errorf("create channel message: %w", err)
 	}
 
-	// 2. Deliver inbox notifications to other members.
+	// 2. Deliver inbox notifications only to @mentioned members.
 	recipientCount := 0
 	for _, m := range members {
-		if m.AgentName == fromAgent {
+		if m.AgentName == fromAgent || !mentionedMembers[m.AgentName] {
 			continue
 		}
 
@@ -537,12 +542,7 @@ func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAge
 			"channel_id":         channelID,
 			"channel_name":       ch.Name,
 			"channel_message_id": channelMsg.ID,
-		}
-		if len(mentionedAgentsList) > 0 {
-			inboxMetaObj["mentioned_agents"] = mentionedAgentsList
-		}
-		if mentionedMembers[m.AgentName] {
-			inboxMetaObj["mention"] = true
+			"mention":            true,
 		}
 		inboxMetaBytes, _ := json.Marshal(inboxMetaObj)
 
@@ -552,7 +552,7 @@ func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAge
 			Metadata: string(inboxMetaBytes),
 		})
 		if err != nil {
-			s.logger.Error("failed to send channel notification",
+			s.logger.Error("failed to send mention notification",
 				"channel_id", channelID,
 				"from", fromAgent,
 				"to", m.AgentName,

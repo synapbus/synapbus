@@ -60,6 +60,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: run
+              mountPath: /tmp
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -68,6 +70,10 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

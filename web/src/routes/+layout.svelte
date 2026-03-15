@@ -21,8 +21,8 @@
 		return client.onEvent((event) => {
 			if (event.type === 'new_message') {
 				const d = event.data;
-				if (d.channel_name) {
-					notifications.incrementUnread('channel', d.channel_name);
+				if (d.channel) {
+					notifications.incrementUnread('channel', d.channel);
 				} else if (d.from_agent) {
 					notifications.incrementUnread('dm', d.from_agent);
 				}
@@ -50,7 +50,11 @@
 	});
 
 	$effect(() => {
-		if ($user && sseClient && !sseClient.connected) {
+		if ($user && !sseClient) {
+			sseClient = new SSEClient();
+			sseClient.connect();
+			sseUnsubscribe = setupNotifications(sseClient);
+		} else if ($user && sseClient && !sseClient.connected) {
 			sseClient.connect();
 		}
 	});

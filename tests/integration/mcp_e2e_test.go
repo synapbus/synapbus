@@ -480,17 +480,17 @@ func TestE2E_ChannelMessaging(t *testing.T) {
 		t.Errorf("send status = %v, want sent", sendResult["status"])
 	}
 
-	// Bob reads his inbox and should see the channel message.
-	inbox := bobClient.CallTool("execute", map[string]any{
-		"code": `call("read_inbox", { include_read: true })`,
+	// Bob reads channel messages (DMs only sent for @mentions).
+	chMsgs := bobClient.CallTool("execute", map[string]any{
+		"code": `call("get_channel_messages", { channel_name: "project-x", limit: 10 })`,
 	})
-	inboxData := unwrapCallResult(t, inbox)
-	count := inboxData["count"].(float64)
+	chData := unwrapCallResult(t, chMsgs)
+	count := chData["count"].(float64)
 	if count < 1 {
-		t.Fatalf("Bob's inbox count = %v, want >= 1", count)
+		t.Fatalf("channel message count = %v, want >= 1", count)
 	}
 
-	messages := inboxData["messages"].([]any)
+	messages := chData["messages"].([]any)
 	found := false
 	for _, m := range messages {
 		msg := m.(map[string]any)
@@ -500,7 +500,7 @@ func TestE2E_ChannelMessaging(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("Bob did not receive the channel message")
+		t.Error("channel message not found via get_channel_messages")
 	}
 }
 

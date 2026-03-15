@@ -315,23 +315,8 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast real-time event to connected SSE clients
-	if h.broadcaster != nil {
-		event := NewMessageEvent{
-			MessageID: msg.ID,
-			FromAgent: msg.FromAgent,
-			ToAgent:   msg.ToAgent,
-		}
-		if msg.ChannelID != nil && h.broadcaster.channelService != nil {
-			ch, chErr := h.broadcaster.channelService.GetChannel(r.Context(), *msg.ChannelID)
-			if chErr == nil {
-				event.Channel = ch.Name
-			}
-			h.broadcaster.BroadcastChannelMessage(r.Context(), *msg.ChannelID, event)
-		} else {
-			h.broadcaster.BroadcastDM(r.Context(), event)
-		}
-	}
+	// SSE broadcast is handled by the MessageListener on the messaging
+	// service, so it fires for both REST and MCP message paths.
 
 	writeJSON(w, http.StatusCreated, msg)
 }

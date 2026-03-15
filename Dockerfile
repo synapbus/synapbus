@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${VERSION}
 
 # Stage 3: Runtime
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && touch /.dockerenv
 COPY --from=go-builder /synapbus /synapbus
 EXPOSE 8080
 VOLUME ["/data"]

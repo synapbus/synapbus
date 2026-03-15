@@ -6,6 +6,7 @@ import (
 
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/messaging"
 )
 
 // NewMessageEvent is broadcast when a new message is sent.
@@ -105,5 +106,26 @@ func (b *SSEBroadcaster) BroadcastChannelMessage(ctx context.Context, channelID 
 			seen[agent.OwnerID] = true
 			b.BroadcastNewMessage(ctx, agent.OwnerID, msg)
 		}
+	}
+}
+
+// OnMessageSent implements messaging.MessageListener so the SSEBroadcaster
+// can be wired directly into the messaging service. This ensures SSE events
+// fire for messages sent via MCP (agents) as well as the REST API.
+func (b *SSEBroadcaster) OnMessageSent(ctx context.Context, msg *messaging.Message) {
+	event := NewMessageEvent{
+		MessageID: msg.ID,
+		FromAgent: msg.FromAgent,
+		ToAgent:   msg.ToAgent,
+	}
+
+	if msg.ChannelID != nil {
+		ch, err := b.channelService.GetChannel(ctx, *msg.ChannelID)
+		if err == nil {
+			event.Channel = ch.Name
+		}
+		b.BroadcastChannelMessage(ctx, *msg.ChannelID, event)
+	} else {
+		b.BroadcastDM(ctx, event)
 	}
 }

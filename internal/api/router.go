@@ -31,6 +31,7 @@ type RouterConfig struct {
 	K8sService        *k8s.K8sService
 	K8sStore          k8s.K8sStore
 	SSEHub            *SSEHub
+	Broadcaster       *SSEBroadcaster
 	SessionMiddleware func(http.Handler) http.Handler
 }
 
@@ -88,9 +89,10 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 		notificationsHandler := NewNotificationsHandler(cfg.MsgService, cfg.AgentService, cfg.ChannelService)
 
 		// Wire up SSE broadcaster for real-time events
-		if cfg.SSEHub != nil {
-			broadcaster := NewSSEBroadcaster(cfg.SSEHub, cfg.AgentService, cfg.ChannelService)
-			messagesHandler.SetBroadcaster(broadcaster)
+		if cfg.Broadcaster != nil {
+			messagesHandler.SetBroadcaster(cfg.Broadcaster)
+		} else if cfg.SSEHub != nil {
+			messagesHandler.SetBroadcaster(NewSSEBroadcaster(cfg.SSEHub, cfg.AgentService, cfg.ChannelService))
 		}
 
 		r.Group(func(r chi.Router) {

@@ -270,8 +270,8 @@ func TestDefaultSocketPath(t *testing.T) {
 	if f == nil {
 		t.Fatal("--socket persistent flag not found")
 	}
-	if f.DefValue != "/data/synapbus.sock" {
-		t.Errorf("default socket path = %q, want %q", f.DefValue, "/data/synapbus.sock")
+	if f.DefValue != "/tmp/synapbus.sock" {
+		t.Errorf("default socket path = %q, want %q", f.DefValue, "/tmp/synapbus.sock")
 	}
 }
 

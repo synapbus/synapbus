@@ -161,7 +161,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		messageRetention = mr
 	}
 	if adminSocketPath == "" {
-		adminSocketPath = filepath.Join(dataDir, "synapbus.sock")
+		// Default to /tmp in containers — PVC-backed filesystems (NFS, Ceph,
+		// EBS CSI) often don't support Unix domain sockets.
+		if _, err := os.Stat("/.dockerenv"); err == nil {
+			adminSocketPath = "/tmp/synapbus.sock"
+		} else {
+			adminSocketPath = filepath.Join(dataDir, "synapbus.sock")
+		}
 	}
 
 	// Configure slog with JSON handler writing to stderr (stdout is for console output)
@@ -389,6 +395,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 				embPipeline = search.NewPipeline(embProvider, embStore, vectorIndex, searchCfg)
 				embPipeline.Start(ctx)
 
+				// Wire pipeline into messaging so new messages auto-enqueue
+				msgService.SetEmbeddingNotifier(embPipeline)
+
 				// Create search service with semantic support
 				searchService = search.NewService(db.DB, embProvider, vectorIndex, msgService)
 				slog.Info("semantic search enabled",
@@ -529,8 +538,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		r.Mount("/mcp", mcpSrv.Handler())
 	})
 
-	// Create SSE hub for real-time events
+	// Create SSE hub and broadcaster for real-time events
 	sseHub := api.NewSSEHub()
+	sseBroadcaster := api.NewSSEBroadcaster(sseHub, agentService, channelService)
+
+	// Register broadcaster as a message listener so SSE events fire
+	// for messages sent via MCP (agents) as well as the REST API.
+	msgService.AddMessageListener(sseBroadcaster)
 
 	// Mount API routes (traces, export, stats, metrics, attachments, messages, agents, channels, SSE)
 	sessionMiddleware := api.SessionToOwnerMiddleware(userStore, sessionStore)
@@ -544,6 +558,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		APIKeyService:     apiKeyService,
 		DeadLetterStore:   deadLetterStore,
 		SSEHub:            sseHub,
+		Broadcaster:       sseBroadcaster,
 		SessionMiddleware: sessionMiddleware,
 	})
 	r.Mount("/", apiRouter)

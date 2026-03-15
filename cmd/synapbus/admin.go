@@ -17,7 +17,7 @@ var adminSocket string
 // adminRequest sends a command over the Unix socket and returns the parsed response.
 func adminRequest(command string, args interface{}) (map[string]interface{}, error) {
 	socket := adminSocket
-	if s := os.Getenv("SYNAPBUS_SOCKET"); s != "" && socket == "/data/synapbus.sock" {
+	if s := os.Getenv("SYNAPBUS_SOCKET"); s != "" && socket == "/tmp/synapbus.sock" {
 		socket = s
 	}
 
@@ -966,7 +966,7 @@ func addAdminCommands(rootCmd *cobra.Command) {
 	attachmentsCmd.AddCommand(attachmentsGCCmd)
 
 	// ----- add persistent flag and commands to root -----
-	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "/data/synapbus.sock", "Path to admin Unix socket")
+	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "/tmp/synapbus.sock", "Path to admin Unix socket")
 
 	rootCmd.AddCommand(userCmd, agentCmd, auditCmd, backupCmd, messagesCmd, channelsCmd, conversationsCmd, embeddingsCmd, dbCmd, retentionCmd, webhookCmd, k8sCmd, attachmentsCmd)
 }

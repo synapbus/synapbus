@@ -565,25 +565,20 @@ func TestService_BroadcastMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("broadcast delivers inbox notifications", func(t *testing.T) {
+	t.Run("broadcast without mentions sends no DMs", func(t *testing.T) {
 		svc.JoinChannel(ctx, ch.ID, "agent-b")
 		svc.JoinChannel(ctx, ch.ID, "agent-c")
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "multi-member test", 5, "")
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "no-dm-test", 5, "")
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
 
-		// agent-b should have an inbox notification
+		// agent-b should NOT have an inbox notification (no @mention)
 		inboxResult, _ := svc.msgService.ReadInbox(ctx, "agent-b", messaging.ReadOptions{IncludeRead: true})
-		found := false
 		for _, m := range inboxResult.Messages {
-			if m.Body == "multi-member test" {
-				found = true
-				break
+			if m.Body == "no-dm-test" {
+				t.Error("agent-b should not receive inbox DM for non-mention broadcast")
 			}
-		}
-		if !found {
-			t.Error("agent-b did not receive inbox notification")
 		}
 	})
 
@@ -597,12 +592,29 @@ func TestService_BroadcastMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("non-member cannot broadcast", func(t *testing.T) {
-		// agent-c is a member but let's test someone who isn't
+	t.Run("non-member auto-joins public channel on broadcast", func(t *testing.T) {
 		seedAgent(t, svc.store.(*SQLiteChannelStore).db, "outsider")
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "outsider", "unauthorized", 5, "")
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "outsider", "auto-joined", 5, "")
+		if err != nil {
+			t.Fatalf("expected auto-join for public channel, got %v", err)
+		}
+		isMember, _ := svc.IsMember(ctx, ch.ID, "outsider")
+		if !isMember {
+			t.Error("outsider should be a member after auto-join")
+		}
+	})
+
+	t.Run("non-member cannot broadcast to private channel", func(t *testing.T) {
+		privCh, err := svc.CreateChannel(ctx, CreateChannelRequest{
+			Name: "private-test", Type: TypeStandard, IsPrivate: true, CreatedBy: "agent-a",
+		})
+		if err != nil {
+			t.Fatalf("create private channel: %v", err)
+		}
+		seedAgent(t, svc.store.(*SQLiteChannelStore).db, "outsider2")
+		_, err = svc.BroadcastMessage(ctx, privCh.ID, "outsider2", "unauthorized", 5, "")
 		if !errors.Is(err, ErrNotChannelMember) {
-			t.Errorf("expected ErrNotChannelMember, got %v", err)
+			t.Errorf("expected ErrNotChannelMember for private channel, got %v", err)
 		}
 	})
 
@@ -642,20 +654,11 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 			t.Error("agent-b did not receive inbox notification")
 		}
 
-		// agent-c was NOT mentioned — inbox notification should NOT have mention:true
+		// agent-c was NOT mentioned — should NOT receive an inbox DM at all
 		inboxResult, _ = svc.msgService.ReadInbox(ctx, "agent-c", messaging.ReadOptions{IncludeRead: true})
 		for _, m := range inboxResult.Messages {
 			if m.Body == "hey @agent-b check this" {
-				var meta map[string]any
-				json.Unmarshal(m.Metadata, &meta)
-				if meta["mention"] == true {
-					t.Error("agent-c should NOT have mention flag")
-				}
-				// But should still have mentioned_agents list
-				if _, ok := meta["mentioned_agents"]; !ok {
-					t.Error("agent-c metadata should have mentioned_agents list")
-				}
-				break
+				t.Error("agent-c should not receive inbox DM when not @mentioned")
 			}
 		}
 	})

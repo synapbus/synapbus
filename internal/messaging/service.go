@@ -12,11 +12,25 @@ import (
 	"github.com/synapbus/synapbus/internal/trace"
 )
 
+// EmbeddingNotifier is called when messages are created or deleted so the
+// embedding pipeline can enqueue them without a direct import dependency.
+type EmbeddingNotifier interface {
+	OnMessageCreated(ctx context.Context, messageID int64, body string)
+}
+
+// MessageListener is notified after every message is persisted.
+// Implementations must not block — use goroutines for slow work.
+type MessageListener interface {
+	OnMessageSent(ctx context.Context, msg *Message)
+}
+
 // MessagingService provides business logic for messaging operations.
 type MessagingService struct {
 	store      MessageStore
 	tracer     *trace.Tracer
 	dispatcher dispatcher.EventDispatcher
+	embeddings EmbeddingNotifier
+	listeners  []MessageListener
 	logger     *slog.Logger
 }
 
@@ -32,6 +46,16 @@ func NewMessagingService(store MessageStore, tracer *trace.Tracer) *MessagingSer
 // SetDispatcher sets the event dispatcher for webhook/K8s delivery.
 func (s *MessagingService) SetDispatcher(d dispatcher.EventDispatcher) {
 	s.dispatcher = d
+}
+
+// SetEmbeddingNotifier sets the embedding pipeline callback for new messages.
+func (s *MessagingService) SetEmbeddingNotifier(n EmbeddingNotifier) {
+	s.embeddings = n
+}
+
+// AddMessageListener registers a listener that is notified after message creation.
+func (s *MessagingService) AddMessageListener(l MessageListener) {
+	s.listeners = append(s.listeners, l)
 }
 
 // SendMessage creates a message, auto-creating conversations as needed.
@@ -119,6 +143,16 @@ func (s *MessagingService) SendMessage(ctx context.Context, from, to, body strin
 
 	if err := s.store.InsertMessage(ctx, msg); err != nil {
 		return nil, fmt.Errorf("insert message: %w", err)
+	}
+
+	// Enqueue for embedding (async, best-effort)
+	if s.embeddings != nil {
+		s.embeddings.OnMessageCreated(ctx, msg.ID, msg.Body)
+	}
+
+	// Notify listeners (SSE, etc.)
+	for _, l := range s.listeners {
+		l.OnMessageSent(ctx, msg)
 	}
 
 	s.logger.Info("message sent",
