@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
+	"github.com/synapbus/synapbus/internal/a2a"
 	"github.com/synapbus/synapbus/internal/actions"
 	"github.com/synapbus/synapbus/internal/admin"
 	"github.com/synapbus/synapbus/internal/agents"
@@ -528,6 +529,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// OAuth metadata (public, per RFC 8414)
 	r.Get("/.well-known/oauth-authorization-server", authHandlers.HandleOAuthMetadata)
 
+	// A2A Agent Card discovery (public, no auth required)
+	agentCardBaseURL := authCfg.IssuerURL // reuse the same base URL config
+	r.Get("/.well-known/agent-card.json", a2a.NewAgentCardHandler(
+		&a2aAgentListerAdapter{agentService: agentService},
+		agentCardBaseURL,
+		version,
+	))
+
 	// OAuth endpoints
 	r.Get("/oauth/authorize", authHandlers.HandleAuthorizeGet)
 	r.Post("/oauth/authorize", authHandlers.HandleAuthorizePost)
@@ -758,6 +767,28 @@ func generateRandomPassword() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// a2aAgentListerAdapter adapts agents.AgentService to a2a.AgentLister.
+type a2aAgentListerAdapter struct {
+	agentService *agents.AgentService
+}
+
+func (a *a2aAgentListerAdapter) ListAllActiveAgents(ctx context.Context) ([]a2a.AgentInfo, error) {
+	agentsList, err := a.agentService.ListAllActiveAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]a2a.AgentInfo, 0, len(agentsList))
+	for _, agent := range agentsList {
+		result = append(result, a2a.AgentInfo{
+			Name:         agent.Name,
+			DisplayName:  agent.DisplayName,
+			Type:         agent.Type,
+			Capabilities: agent.Capabilities,
+		})
+	}
+	return result, nil
 }
 
 // agentListerAdapter adapts agents.AgentService to auth.AgentLister.

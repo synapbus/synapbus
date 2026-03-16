@@ -15,6 +15,7 @@ type AgentStore interface {
 	UpdateAgent(ctx context.Context, agent *Agent) error
 	DeactivateAgent(ctx context.Context, name string) error
 	ListActiveAgents(ctx context.Context) ([]*Agent, error)
+	ListAllActiveAgents(ctx context.Context) ([]*Agent, error)
 	ListAgentsByOwner(ctx context.Context, ownerID int64) ([]*Agent, error)
 	SearchAgentsByCapability(ctx context.Context, query string) ([]*Agent, error)
 	GetHumanAgentByOwner(ctx context.Context, ownerID int64) (*Agent, error)
@@ -104,6 +105,18 @@ func (s *SQLiteAgentStore) ListActiveAgents(ctx context.Context) ([]*Agent, erro
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, display_name, type, capabilities, owner_id, api_key_hash, status, created_at, updated_at
 		 FROM agents WHERE status = 'active' ORDER BY name`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanAgents(rows)
+}
+
+func (s *SQLiteAgentStore) ListAllActiveAgents(ctx context.Context) ([]*Agent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, display_name, type, capabilities, owner_id, api_key_hash, status, created_at, updated_at
+		 FROM agents WHERE status = 'active' AND type != 'human' ORDER BY name`,
 	)
 	if err != nil {
 		return nil, err
