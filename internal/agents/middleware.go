@@ -229,9 +229,13 @@ func RequiredAuthMiddlewareWithOAuth(service *AgentService, keyService *apikeys.
 
 // resolveOAuthToken introspects an OAuth bearer token and extracts agent identity.
 func resolveOAuthToken(ctx context.Context, provider fosite.OAuth2Provider, token string, service *AgentService) (agentName string, ownerID string, ok bool) {
-	// Use a fositeSession-compatible struct for introspection.
-	// We import the type indirectly through the fosite interface.
-	_, ar, err := provider.IntrospectToken(ctx, token, fosite.AccessToken, &oauthIntrospectSession{})
+	// Decouple from the HTTP request context so token introspection completes
+	// even if the client disconnects (fixes "context canceled" errors during
+	// concurrent MCP connections from claude.ai).
+	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+
+	_, ar, err := provider.IntrospectToken(dbCtx, token, fosite.AccessToken, &oauthIntrospectSession{})
 	if err != nil {
 		return "", "", false
 	}

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ory/fosite"
 )
@@ -107,8 +108,11 @@ func RequireBearer(provider fosite.OAuth2Provider, userStore UserStore) func(htt
 			token := parts[1]
 			_ = token
 
-			// Use fosite introspection
-			_, ar, err := provider.IntrospectToken(r.Context(), parts[1], fosite.AccessToken, new(fositeSession))
+			// Use fosite introspection — decouple from HTTP request context so
+			// token validation completes even if the client disconnects.
+			dbCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+			_, ar, err := provider.IntrospectToken(dbCtx, parts[1], fosite.AccessToken, new(fositeSession))
+			cancel()
 			if err != nil {
 				slog.Debug("bearer token validation failed", "error", err)
 				w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
