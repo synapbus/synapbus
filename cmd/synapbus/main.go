@@ -30,6 +30,7 @@ import (
 	"github.com/synapbus/synapbus/internal/apikeys"
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/auth"
+	"github.com/synapbus/synapbus/internal/auth/idp"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
 	"github.com/synapbus/synapbus/internal/dispatcher"
@@ -305,6 +306,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Wire agent lister into auth handlers for OAuth authorize page
 	authHandlers.SetAgentLister(&agentListerAdapter{agentService: agentService})
 
+	// Initialize external identity providers (GitHub, Google, Azure AD)
+	baseURL := authCfg.IssuerURL
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%d", port)
+	}
+	idpProviders := idp.LoadConfig(baseURL)
+
 	// Register default MCP OAuth client if it doesn't already exist (T016)
 	ensureDefaultMCPClient(ctx, db.DB, authCfg.BcryptCost)
 
@@ -513,6 +521,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Auth endpoints (public)
 	r.Post("/auth/register", withHumanAgent(authHandlers.HandleRegister, userStore, agentService, channelService))
 	r.Post("/auth/login", withHumanAgent(authHandlers.HandleLogin, userStore, agentService, channelService))
+
+	// External identity provider endpoints (public)
+	if len(idpProviders) > 0 {
+		idpStore := idp.NewUserIdentityStore(db.DB)
+		idpAgentAdapter := &idpAgentProvisioner{agentService: agentService, channelService: channelService}
+		idpHandlers := idp.NewHandlers(idpProviders, idpStore, userStore, sessionStore, idpAgentAdapter)
+		r.Get("/auth/providers", idpHandlers.HandleListProviders)
+		r.Get("/auth/login/{provider}", idpHandlers.HandleLogin)
+		r.Get("/auth/callback/{provider}", idpHandlers.HandleCallback)
+		slog.Info("external identity providers configured", "count", len(idpProviders))
+	} else {
+		// Return empty list when no providers configured
+		r.Get("/auth/providers", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"providers":[]}`))
+		})
+	}
 
 	// OAuth metadata (public, per RFC 8414)
 	r.Get("/.well-known/oauth-authorization-server", authHandlers.HandleOAuthMetadata)
@@ -768,6 +793,28 @@ func (a *agentListerAdapter) ListAgentsByOwner(ctx context.Context, ownerID int6
 		})
 	}
 	return result, nil
+}
+
+// idpAgentProvisioner adapts agents.AgentService + channels.Service to idp.AgentProvisioner.
+type idpAgentProvisioner struct {
+	agentService   *agents.AgentService
+	channelService *channels.Service
+}
+
+func (a *idpAgentProvisioner) ProvisionHumanAgent(ctx context.Context, username, displayName string, ownerID int64) error {
+	humanAgent, err := a.agentService.EnsureHumanAgent(ctx, username, displayName, ownerID)
+	if err != nil {
+		return fmt.Errorf("ensure human agent: %w", err)
+	}
+	if humanAgent != nil {
+		if chErr := a.channelService.EnsureMyAgentsChannel(ctx, username, humanAgent.Name); chErr != nil {
+			slog.Warn("failed to ensure my-agents channel after IdP login",
+				"username", username,
+				"error", chErr,
+			)
+		}
+	}
+	return nil
 }
 
 // ensureDefaultMCPClient creates the "mcp-default" public OAuth client if it doesn't exist.

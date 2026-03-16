@@ -18,6 +18,7 @@ type UserStore interface {
 	CreateUser(ctx context.Context, username, password, displayName string) (*User, error)
 	GetUserByID(ctx context.Context, id int64) (*User, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	UpdatePassword(ctx context.Context, userID int64, newPassword string) error
 	ListUsers(ctx context.Context) ([]*User, error)
 	CountUsers(ctx context.Context) (int, error)
@@ -113,6 +114,36 @@ func (s *SQLiteUserStore) GetUserByID(ctx context.Context, id int64) (*User, err
 		return nil, fmt.Errorf("query user: %w", err)
 	}
 	return user, nil
+}
+
+// GetUserByEmail retrieves a user by their email address.
+// Returns ErrUserNotFound if no user has the given email or if email is empty.
+func (s *SQLiteUserStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	if email == "" {
+		return nil, ErrUserNotFound
+	}
+	user := &User{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, username, password_hash, display_name, role, created_at, updated_at
+		 FROM users WHERE email = ?`, email,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName,
+		&user.Role, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("query user by email: %w", err)
+	}
+	return user, nil
+}
+
+// SetEmail updates a user's email address.
+func (s *SQLiteUserStore) SetEmail(ctx context.Context, userID int64, email string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		email, userID,
+	)
+	return err
 }
 
 // GetUserByUsername retrieves a user by their username.
