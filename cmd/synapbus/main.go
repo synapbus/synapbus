@@ -477,6 +477,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		slog.Info("message retention disabled")
 	}
 
+	// Start stalemate worker (message acknowledgment enforcement)
+	stalemateConfig := messaging.ParseStalemateConfig()
+	stalemateWorker := messaging.NewStalemateWorker(db.DB, msgService, &channelLookupAdapter{channelService: channelService}, stalemateConfig)
+	stalemateWorker.Start()
+	slog.Info("stalemate worker started",
+		"processing_timeout", stalemateConfig.ProcessingTimeout.String(),
+		"reminder_after", stalemateConfig.ReminderAfter.String(),
+		"escalate_after", stalemateConfig.EscalateAfter.String(),
+		"interval", stalemateConfig.Interval.String(),
+	)
+
 	// Create health checker
 	healthChecker := health.NewChecker(db.DB, version)
 
@@ -648,6 +659,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		retentionWorker.Stop()
 	}
 
+	// Stop stalemate worker
+	stalemateWorker.Stop()
+
 	// Stop embedding pipeline
 	if embPipeline != nil {
 		embPipeline.Stop()
@@ -809,4 +823,17 @@ func ensureDefaultMCPClient(ctx context.Context, db *sql.DB, bcryptCost int) {
 		"redirect_uris", "http://localhost:*",
 		"scopes", "mcp",
 	)
+}
+
+// channelLookupAdapter adapts channels.Service to messaging.ChannelLookup.
+type channelLookupAdapter struct {
+	channelService *channels.Service
+}
+
+func (a *channelLookupAdapter) GetChannelIDByName(ctx context.Context, name string) (int64, error) {
+	ch, err := a.channelService.GetChannelByName(ctx, name)
+	if err != nil {
+		return 0, err
+	}
+	return ch.ID, nil
 }
