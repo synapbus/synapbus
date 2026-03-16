@@ -335,7 +335,7 @@ func (h *HybridToolRegistrar) handleSendMessage(ctx context.Context, req mcplib.
 			return mcplib.NewToolResultError(fmt.Sprintf("send_message to channel failed: %s", err)), nil
 		}
 
-		messages, err := h.channelService.BroadcastMessage(ctx, channelID, agentName, body, priority, metadataStr)
+		messages, err := h.channelService.BroadcastMessage(ctx, channelID, agentName, body, priority, metadataStr, replyTo)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("send_message to channel failed: %s", err)), nil
 		}
