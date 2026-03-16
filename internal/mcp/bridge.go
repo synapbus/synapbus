@@ -546,7 +546,15 @@ func (b *ServiceBridge) callSendChannelMessage(ctx context.Context, args map[str
 	priority := getInt(args, "priority", 5)
 	metadata := getString(args, "metadata", "")
 
-	messages, err := b.channelService.BroadcastMessage(ctx, channelID, b.agentName, body, priority, metadata)
+	var replyTo *int64
+	if v, ok := args["reply_to"]; ok {
+		if f, ok := v.(float64); ok {
+			r := int64(f)
+			replyTo = &r
+		}
+	}
+
+	messages, err := b.channelService.BroadcastMessage(ctx, channelID, b.agentName, body, priority, metadata, replyTo)
 	if err != nil {
 		return nil, err
 	}

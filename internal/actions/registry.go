@@ -306,6 +306,7 @@ func allActions() []Action {
 				{Name: "body", Type: "string", Description: "Message body text", Required: true},
 				{Name: "priority", Type: "number", Description: "Message priority (1-10, default 5)", Default: "5"},
 				{Name: "metadata", Type: "string", Description: "JSON metadata object (optional)"},
+				{Name: "reply_to", Type: "number", Description: "Message ID to reply to (creates a thread)", Required: false},
 			},
 			Returns: "JSON with channel_id, message_id, and status 'sent'",
 			Examples: []Example{

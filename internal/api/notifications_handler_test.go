@@ -333,7 +333,7 @@ func TestChannelMessages_IncludesLastRead(t *testing.T) {
 	}
 
 	// Broadcast messages
-	msgs, err := channelService.BroadcastMessage(ctx, ch.ID, "human-agent", "Hello channel", 5, "")
+	msgs, err := channelService.BroadcastMessage(ctx, ch.ID, "human-agent", "Hello channel", 5, "", nil)
 	if err != nil {
 		t.Fatalf("broadcast: %v", err)
 	}
