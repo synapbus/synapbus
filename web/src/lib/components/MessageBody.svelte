@@ -39,17 +39,24 @@
 
 	// Process inline elements that are NOT inside code spans
 	function processInlineNonCode(text: string): string {
-		let s = escapeHtml(text);
-
-		// URLs - must come before bold/italic to avoid mangling URLs with underscores
-		s = s.replace(
-			/https?:\/\/[^\s&lt;&gt;&amp;]+/g,
+		// Extract URLs BEFORE HTML escaping to avoid breaking them
+		const urlPlaceholders: string[] = [];
+		let s = text.replace(
+			/https?:\/\/[^\s<>()[\]"'`]+/g,
 			(url) => {
-				// Decode escaped HTML entities back for the href
-				const href = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
-				return `<a href="${href}" target="_blank" rel="noopener" class="msg-link">${url}</a>`;
+				// Strip trailing punctuation that's likely not part of the URL
+				const cleaned = url.replace(/[.,;:!?)]+$/, '');
+				const trailing = url.slice(cleaned.length);
+				const idx = urlPlaceholders.length;
+				urlPlaceholders.push(
+					`<a href="${escapeHtml(cleaned)}" target="_blank" rel="noopener" class="msg-link">${escapeHtml(cleaned)}</a>${escapeHtml(trailing)}`
+				);
+				return `\x01URL${idx}\x01`;
 			}
 		);
+
+		// Now HTML-escape the rest
+		s = escapeHtml(s);
 
 		// Bold: **text**
 		s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -68,6 +75,9 @@
 			/#([\w][\w.-]*)/g,
 			'<a href="/channels/$1" class="msg-channel">$&</a>'
 		);
+
+		// Restore URL placeholders
+		s = s.replace(/\x01URL(\d+)\x01/g, (_, idx) => urlPlaceholders[parseInt(idx)]);
 
 		return s;
 	}
