@@ -308,7 +308,31 @@ func addAdminCommands(rootCmd *cobra.Command) {
 	agentRevokeKeyCmd.Flags().StringVar(&agentRevokeKeyName, "name", "", "Agent name")
 	agentRevokeKeyCmd.MarkFlagRequired("name")
 
-	agentCmd.AddCommand(agentListCmd, agentCreateCmd, agentDeleteCmd, agentRevokeKeyCmd)
+	var (
+		agentUpdateCapsName string
+		agentUpdateCapsJSON string
+	)
+	agentUpdateCapsCmd := &cobra.Command{
+		Use:   "update-capabilities",
+		Short: "Update an agent's capabilities JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("agent.update_capabilities", map[string]interface{}{
+				"name":         agentUpdateCapsName,
+				"capabilities": json.RawMessage(agentUpdateCapsJSON),
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	agentUpdateCapsCmd.Flags().StringVar(&agentUpdateCapsName, "name", "", "Agent name")
+	agentUpdateCapsCmd.Flags().StringVar(&agentUpdateCapsJSON, "capabilities", "", "Capabilities JSON (e.g. '{\"role\":\"researcher\"}')")
+	agentUpdateCapsCmd.MarkFlagRequired("name")
+	agentUpdateCapsCmd.MarkFlagRequired("capabilities")
+
+	agentCmd.AddCommand(agentListCmd, agentCreateCmd, agentDeleteCmd, agentRevokeKeyCmd, agentUpdateCapsCmd)
 
 	// ----- audit commands -----
 	auditCmd := &cobra.Command{

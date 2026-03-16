@@ -245,6 +245,12 @@ func (s *AgentService) ListAgents(ctx context.Context, ownerID int64) ([]*Agent,
 	return s.store.ListAgentsByOwner(ctx, ownerID)
 }
 
+// ListAllActiveAgents returns all active non-human agents across all owners.
+// Used for the A2A Agent Card discovery endpoint.
+func (s *AgentService) ListAllActiveAgents(ctx context.Context) ([]*Agent, error) {
+	return s.store.ListAllActiveAgents(ctx)
+}
+
 // RevokeKey generates a new API key for an agent. Only the owner can do this.
 // Returns the agent and the new raw API key (shown once).
 func (s *AgentService) RevokeKey(ctx context.Context, name string, ownerID int64) (*Agent, string, error) {

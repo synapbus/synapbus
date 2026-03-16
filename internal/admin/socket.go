@@ -139,6 +139,8 @@ func (s *AdminServer) dispatch(req Request) Response {
 		return s.handleAgentDelete(ctx, req.Args)
 	case "agent.revoke_key":
 		return s.handleAgentRevokeKey(ctx, req.Args)
+	case "agent.update_capabilities":
+		return s.handleAgentUpdateCapabilities(ctx, req.Args)
 
 	// --- audit commands ---
 	case "audit.list":
@@ -443,6 +445,35 @@ func (s *AdminServer) handleAgentRevokeKey(ctx context.Context, args json.RawMes
 	return Response{OK: true, Data: map[string]interface{}{
 		"name":        p.Name,
 		"new_api_key": apiKey,
+	}}
+}
+
+func (s *AdminServer) handleAgentUpdateCapabilities(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Name         string          `json:"name"`
+		Capabilities json.RawMessage `json:"capabilities"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.Name == "" {
+		return Response{OK: false, Error: "name is required"}
+	}
+	if len(p.Capabilities) == 0 {
+		return Response{OK: false, Error: "capabilities is required"}
+	}
+	if !json.Valid(p.Capabilities) {
+		return Response{OK: false, Error: "capabilities must be valid JSON"}
+	}
+
+	agent, err := s.services.Agents.UpdateAgent(ctx, p.Name, "", p.Capabilities)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+
+	return Response{OK: true, Data: map[string]interface{}{
+		"name":         agent.Name,
+		"capabilities": json.RawMessage(agent.Capabilities),
 	}}
 }
 
