@@ -14,6 +14,16 @@ const (
 	StatusFailed     = "failed"
 )
 
+// AttachmentInfo is a lightweight attachment summary included in message responses.
+// It avoids importing the attachments package into the messaging package.
+type AttachmentInfo struct {
+	Hash             string `json:"hash"`
+	OriginalFilename string `json:"original_filename"`
+	Size             int64  `json:"size"`
+	MIMEType         string `json:"mime_type"`
+	IsImage          bool   `json:"is_image"`
+}
+
 // Message represents a single message in the system.
 type Message struct {
 	ID             int64            `json:"id"`
@@ -30,6 +40,8 @@ type Message struct {
 	ClaimedAt      *time.Time       `json:"claimed_at,omitempty"`
 	CreatedAt      time.Time        `json:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at"`
+	ReplyCount     int              `json:"reply_count"`
+	Attachments    []AttachmentInfo `json:"attachments,omitempty"`
 }
 
 // Conversation groups related messages into a thread.

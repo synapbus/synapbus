@@ -1,11 +1,15 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -987,7 +991,48 @@ func addAdminCommands(rootCmd *cobra.Command) {
 		},
 	}
 
-	attachmentsCmd.AddCommand(attachmentsGCCmd)
+	var attachmentsBackupOutput string
+	var attachmentsBackupDataDir string
+	attachmentsBackupCmd := &cobra.Command{
+		Use:   "backup",
+		Short: "Create a tar.gz backup of all attachments (no server required)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			attachDir := filepath.Join(attachmentsBackupDataDir, "attachments")
+			if _, err := os.Stat(attachDir); os.IsNotExist(err) {
+				return fmt.Errorf("attachments directory does not exist: %s", attachDir)
+			}
+			fileCount, totalSize, err := backupAttachments(attachDir, attachmentsBackupOutput)
+			if err != nil {
+				return fmt.Errorf("backup failed: %w", err)
+			}
+			fmt.Printf("Backup complete: %d files, %s total, written to %s\n", fileCount, formatBytes(totalSize), attachmentsBackupOutput)
+			return nil
+		},
+	}
+	attachmentsBackupCmd.Flags().StringVar(&attachmentsBackupOutput, "output", "", "Output path for the tar.gz archive")
+	attachmentsBackupCmd.Flags().StringVar(&attachmentsBackupDataDir, "data", "./data", "Data directory")
+	attachmentsBackupCmd.MarkFlagRequired("output")
+
+	var attachmentsRestoreInput string
+	var attachmentsRestoreDataDir string
+	attachmentsRestoreCmd := &cobra.Command{
+		Use:   "restore",
+		Short: "Restore attachments from a tar.gz backup (no server required)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			attachDir := filepath.Join(attachmentsRestoreDataDir, "attachments")
+			restored, skipped, err := restoreAttachments(attachDir, attachmentsRestoreInput)
+			if err != nil {
+				return fmt.Errorf("restore failed: %w", err)
+			}
+			fmt.Printf("Restore complete: %d files restored, %d files skipped (already exist)\n", restored, skipped)
+			return nil
+		},
+	}
+	attachmentsRestoreCmd.Flags().StringVar(&attachmentsRestoreInput, "input", "", "Input path for the tar.gz archive")
+	attachmentsRestoreCmd.Flags().StringVar(&attachmentsRestoreDataDir, "data", "./data", "Data directory")
+	attachmentsRestoreCmd.MarkFlagRequired("input")
+
+	attachmentsCmd.AddCommand(attachmentsGCCmd, attachmentsBackupCmd, attachmentsRestoreCmd)
 
 	// ----- add persistent flag and commands to root -----
 	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "/tmp/synapbus.sock", "Path to admin Unix socket")
@@ -1011,4 +1056,147 @@ func toTableRows(data []map[string]string, headerMap map[string]string) []map[st
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// backupAttachments creates a tar.gz archive of the attachments directory.
+// Returns the number of files archived and total bytes of file content.
+func backupAttachments(attachmentsDir, outputPath string) (int, int64, error) {
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	gzw := gzip.NewWriter(outFile)
+	defer gzw.Close()
+
+	tw := tar.NewWriter(gzw)
+	defer tw.Close()
+
+	var fileCount int
+	var totalSize int64
+
+	err = filepath.Walk(attachmentsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip directories — tar entries for files include the path.
+		if info.IsDir() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(attachmentsDir, path)
+		if err != nil {
+			return fmt.Errorf("relative path: %w", err)
+		}
+
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return fmt.Errorf("file info header: %w", err)
+		}
+		header.Name = relPath
+
+		if err := tw.WriteHeader(header); err != nil {
+			return fmt.Errorf("write header: %w", err)
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("open file: %w", err)
+		}
+		defer f.Close()
+
+		if _, err := io.Copy(tw, f); err != nil {
+			return fmt.Errorf("copy file: %w", err)
+		}
+
+		fileCount++
+		totalSize += info.Size()
+		return nil
+	})
+
+	return fileCount, totalSize, err
+}
+
+// restoreAttachments extracts a tar.gz archive into the attachments directory.
+// Files that already exist on disk are skipped. Returns (restored, skipped) counts.
+func restoreAttachments(attachmentsDir, inputPath string) (int, int, error) {
+	inFile, err := os.Open(inputPath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("open input file: %w", err)
+	}
+	defer inFile.Close()
+
+	gzr, err := gzip.NewReader(inFile)
+	if err != nil {
+		return 0, 0, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+
+	var restored, skipped int
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return restored, skipped, fmt.Errorf("read tar entry: %w", err)
+		}
+
+		// Only handle regular files.
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		// Sanitize: reject absolute paths and path traversal.
+		cleanName := filepath.Clean(header.Name)
+		if filepath.IsAbs(cleanName) || strings.HasPrefix(cleanName, "..") {
+			return restored, skipped, fmt.Errorf("invalid path in archive: %s", header.Name)
+		}
+
+		destPath := filepath.Join(attachmentsDir, cleanName)
+
+		// Skip if already exists (content-addressable, so same hash = same content).
+		if _, err := os.Stat(destPath); err == nil {
+			skipped++
+			continue
+		}
+
+		// Ensure parent directory exists.
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			return restored, skipped, fmt.Errorf("create directory: %w", err)
+		}
+
+		outFile, err := os.Create(destPath)
+		if err != nil {
+			return restored, skipped, fmt.Errorf("create file: %w", err)
+		}
+
+		if _, err := io.Copy(outFile, tr); err != nil {
+			outFile.Close()
+			return restored, skipped, fmt.Errorf("write file: %w", err)
+		}
+		outFile.Close()
+
+		restored++
+	}
+
+	return restored, skipped, nil
+}
+
+// formatBytes returns a human-readable byte count string.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

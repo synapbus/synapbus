@@ -281,6 +281,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	attachmentStore := attachments.NewSQLiteStore(db.DB, slog.Default())
 	attachmentService := attachments.NewService(attachmentStore, cas, slog.Default())
+	msgService.SetAttachmentLinker(&attachmentLinkerAdapter{svc: attachmentService})
 	slog.Info("attachment service initialized", "dir", attachmentsDir)
 
 	// Initialize auth subsystem
@@ -834,6 +835,33 @@ func (a *a2aAgentListerAdapter) ListAllActiveAgents(ctx context.Context) ([]a2a.
 		})
 	}
 	return result, nil
+}
+
+// attachmentLinkerAdapter adapts attachments.Service to messaging.AttachmentLinker.
+type attachmentLinkerAdapter struct {
+	svc *attachments.Service
+}
+
+func (a *attachmentLinkerAdapter) AttachToMessage(ctx context.Context, hash string, messageID int64) error {
+	return a.svc.AttachToMessage(ctx, hash, messageID)
+}
+
+func (a *attachmentLinkerAdapter) GetByMessageID(ctx context.Context, messageID int64) ([]messaging.AttachmentInfo, error) {
+	atts, err := a.svc.GetByMessageID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]messaging.AttachmentInfo, len(atts))
+	for i, att := range atts {
+		results[i] = messaging.AttachmentInfo{
+			Hash:             att.Hash,
+			OriginalFilename: att.OriginalFilename,
+			Size:             att.Size,
+			MIMEType:         att.MIMEType,
+			IsImage:          attachments.IsImageType(att.MIMEType),
+		}
+	}
+	return results, nil
 }
 
 // agentListerAdapter adapts agents.AgentService to auth.AgentLister.

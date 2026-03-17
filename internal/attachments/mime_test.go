@@ -154,6 +154,35 @@ func TestIsImageType(t *testing.T) {
 	}
 }
 
+func TestIsAllowedType(t *testing.T) {
+	tests := []struct {
+		mimeType string
+		want     bool
+	}{
+		{"image/png", true},
+		{"image/jpeg", true},
+		{"image/gif", true},
+		{"application/pdf", true},
+		{"text/plain", true},
+		{"text/csv", true},
+		{"text/plain; charset=utf-8", true},
+		{"application/json", true},
+		{"application/octet-stream", false},
+		{"application/zip", false},
+		{"application/x-executable", false},
+		{"video/mp4", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mimeType, func(t *testing.T) {
+			got := IsAllowedType(tt.mimeType)
+			if got != tt.want {
+				t.Errorf("IsAllowedType(%q) = %v, want %v", tt.mimeType, got, tt.want)
+			}
+		})
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

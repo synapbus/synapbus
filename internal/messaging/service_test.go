@@ -728,5 +728,96 @@ func TestMessagingService_ReadInbox_DateFiltering(t *testing.T) {
 	})
 }
 
+// mockAttachmentLinker is a test double for the AttachmentLinker interface.
+type mockAttachmentLinker struct {
+	attachments map[int64][]AttachmentInfo
+}
+
+func (m *mockAttachmentLinker) AttachToMessage(_ context.Context, _ string, _ int64) error {
+	return nil
+}
+
+func (m *mockAttachmentLinker) GetByMessageID(_ context.Context, messageID int64) ([]AttachmentInfo, error) {
+	return m.attachments[messageID], nil
+}
+
+func TestMessagingService_EnrichMessages(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	// Send a parent message and replies to it.
+	parent, err := svc.SendMessage(ctx, "sender", "receiver", "parent message", SendOptions{Subject: "Enrich Test"})
+	if err != nil {
+		t.Fatalf("SendMessage (parent): %v", err)
+	}
+
+	replyTo := parent.ID
+	for i := 0; i < 3; i++ {
+		_, err := svc.SendMessage(ctx, "receiver", "sender", "reply", SendOptions{
+			Subject: "Enrich Test",
+			ReplyTo: &replyTo,
+		})
+		if err != nil {
+			t.Fatalf("SendMessage (reply %d): %v", i, err)
+		}
+	}
+
+	// Send a message with no replies.
+	noReplies, err := svc.SendMessage(ctx, "sender", "receiver", "standalone", SendOptions{Subject: "Enrich Standalone"})
+	if err != nil {
+		t.Fatalf("SendMessage (standalone): %v", err)
+	}
+
+	t.Run("reply counts populated", func(t *testing.T) {
+		msgs := []*Message{parent, noReplies}
+		svc.EnrichMessages(ctx, msgs)
+
+		if parent.ReplyCount != 3 {
+			t.Errorf("parent ReplyCount = %d, want 3", parent.ReplyCount)
+		}
+		if noReplies.ReplyCount != 0 {
+			t.Errorf("noReplies ReplyCount = %d, want 0", noReplies.ReplyCount)
+		}
+	})
+
+	t.Run("attachments populated when linker set", func(t *testing.T) {
+		linker := &mockAttachmentLinker{
+			attachments: map[int64][]AttachmentInfo{
+				parent.ID: {
+					{Hash: "abc123", OriginalFilename: "photo.png", Size: 1024, MIMEType: "image/png", IsImage: true},
+				},
+			},
+		}
+		svc.SetAttachmentLinker(linker)
+
+		// Reset enrichment state.
+		parent.ReplyCount = 0
+		parent.Attachments = nil
+		noReplies.ReplyCount = 0
+		noReplies.Attachments = nil
+
+		msgs := []*Message{parent, noReplies}
+		svc.EnrichMessages(ctx, msgs)
+
+		if parent.ReplyCount != 3 {
+			t.Errorf("parent ReplyCount = %d, want 3", parent.ReplyCount)
+		}
+		if len(parent.Attachments) != 1 {
+			t.Fatalf("parent Attachments count = %d, want 1", len(parent.Attachments))
+		}
+		if parent.Attachments[0].Hash != "abc123" {
+			t.Errorf("attachment hash = %s, want abc123", parent.Attachments[0].Hash)
+		}
+		if noReplies.Attachments != nil {
+			t.Errorf("noReplies Attachments should be nil, got %v", noReplies.Attachments)
+		}
+	})
+
+	t.Run("empty slice is a no-op", func(t *testing.T) {
+		svc.EnrichMessages(ctx, []*Message{})
+		// Should not panic or error.
+	})
+}
+
 // suppress unused import warning for storage package
 var _ = storage.RunMigrations

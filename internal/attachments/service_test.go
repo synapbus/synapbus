@@ -202,6 +202,80 @@ func TestService_Dedup(t *testing.T) {
 	}
 }
 
+func TestService_Upload_FileTypeValidation(t *testing.T) {
+	// PNG magic bytes.
+	pngContent := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00}
+	// PDF magic bytes.
+	pdfContent := []byte("%PDF-1.4 some pdf content here")
+	// Plain text content.
+	textContent := []byte("just some plain text content")
+
+	tests := []struct {
+		name     string
+		content  []byte
+		filename string
+		mimeType string
+		wantErr  error
+	}{
+		{
+			name:     "valid image upload",
+			content:  pngContent,
+			filename: "photo.png",
+			wantErr:  nil,
+		},
+		{
+			name:     "valid PDF upload",
+			content:  pdfContent,
+			filename: "report.pdf",
+			wantErr:  nil,
+		},
+		{
+			name:     "valid text file upload",
+			content:  textContent,
+			filename: "notes.txt",
+			wantErr:  nil,
+		},
+		{
+			name:     "invalid type zip rejected",
+			content:  []byte("not real zip content"),
+			filename: "archive.zip",
+			mimeType: "application/zip",
+			wantErr:  ErrUnsupportedType,
+		},
+		{
+			name:     "invalid type executable rejected",
+			content:  []byte{0x7f, 0x45, 0x4c, 0x46},
+			filename: "program.exe",
+			mimeType: "application/x-executable",
+			wantErr:  ErrUnsupportedType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newTestService(t)
+			ctx := context.Background()
+
+			_, err := svc.Upload(ctx, UploadRequest{
+				Content:    bytes.NewReader(tt.content),
+				Filename:   tt.filename,
+				MIMEType:   tt.mimeType,
+				UploadedBy: "agent-a",
+			})
+
+			if tt.wantErr != nil {
+				if err != tt.wantErr {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Upload: %v", err)
+			}
+		})
+	}
+}
+
 func TestService_GarbageCollect(t *testing.T) {
 	svc, db := newTestService(t)
 	ctx := context.Background()

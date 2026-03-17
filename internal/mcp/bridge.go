@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/synapbus/synapbus/internal/agents"
@@ -132,12 +133,34 @@ func (b *ServiceBridge) callSendMessage(ctx context.Context, args map[string]any
 		replyTo = &v
 	}
 
+	var attachmentHashes []string
+	if attVal, ok := args["attachments"]; ok {
+		switch v := attVal.(type) {
+		case string:
+			for _, h := range strings.Split(v, ",") {
+				h = strings.TrimSpace(h)
+				if h != "" {
+					attachmentHashes = append(attachmentHashes, h)
+				}
+			}
+		case []any:
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					attachmentHashes = append(attachmentHashes, s)
+				}
+			}
+		case []string:
+			attachmentHashes = v
+		}
+	}
+
 	opts := messaging.SendOptions{
-		Subject:   getString(args, "subject", ""),
-		Priority:  getInt(args, "priority", 5),
-		Metadata:  getString(args, "metadata", ""),
-		ChannelID: channelID,
-		ReplyTo:   replyTo,
+		Subject:     getString(args, "subject", ""),
+		Priority:    getInt(args, "priority", 5),
+		Metadata:    getString(args, "metadata", ""),
+		ChannelID:   channelID,
+		ReplyTo:     replyTo,
+		Attachments: attachmentHashes,
 	}
 
 	msg, err := b.msgService.SendMessage(ctx, b.agentName, to, body, opts)
@@ -554,7 +577,28 @@ func (b *ServiceBridge) callSendChannelMessage(ctx context.Context, args map[str
 		}
 	}
 
-	messages, err := b.channelService.BroadcastMessage(ctx, channelID, b.agentName, body, priority, metadata, replyTo)
+	var attachmentHashes []string
+	if attVal, ok := args["attachments"]; ok {
+		switch v := attVal.(type) {
+		case string:
+			for _, h := range strings.Split(v, ",") {
+				h = strings.TrimSpace(h)
+				if h != "" {
+					attachmentHashes = append(attachmentHashes, h)
+				}
+			}
+		case []any:
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					attachmentHashes = append(attachmentHashes, s)
+				}
+			}
+		case []string:
+			attachmentHashes = v
+		}
+	}
+
+	messages, err := b.channelService.BroadcastMessage(ctx, channelID, b.agentName, body, priority, metadata, replyTo, attachmentHashes)
 	if err != nil {
 		return nil, err
 	}

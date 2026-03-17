@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { channels as channelsApi, messages as messagesApi, agents as agentsApi } from '$lib/api/client';
+	import { channels as channelsApi, messages as messagesApi, agents as agentsApi, attachments as attachmentsApi } from '$lib/api/client';
 	import { openThread, closeThread } from '$lib/stores/thread';
 	import { notifications } from '$lib/stores/notifications';
 	import MessageBody from '$lib/components/MessageBody.svelte';
+	import AttachmentPreview from '$lib/components/AttachmentPreview.svelte';
 
 	let channel = $state<any>(null);
 	let members = $state<any[]>([]);
@@ -20,6 +21,39 @@
 	let body = $state('');
 	let sending = $state(false);
 	let sendError = $state('');
+
+	// Attachment state
+	let uploadedAttachments = $state<{hash: string, name: string, size: number}[]>([]);
+	let uploading = $state(false);
+	let fileInputEl: HTMLInputElement;
+
+	function triggerFileInput() { fileInputEl?.click(); }
+
+	async function handleFileSelected(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		uploading = true;
+		try {
+			const result = await attachmentsApi.upload(file);
+			uploadedAttachments = [...uploadedAttachments, { hash: result.hash, name: result.original_filename, size: result.size }];
+		} catch (err: any) {
+			sendError = err.message || 'Upload failed';
+		} finally {
+			uploading = false;
+			input.value = '';
+		}
+	}
+
+	function removeAttachment(hash: string) {
+		uploadedAttachments = uploadedAttachments.filter(a => a.hash !== hash);
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes < 1024) return bytes + ' B';
+		if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+		return (bytes / 1048576).toFixed(1) + ' MB';
+	}
 
 	// Mark-as-read timer
 	let markReadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -132,15 +166,17 @@
 	}
 
 	async function handleSend() {
-		if (!body.trim()) return;
+		if (!body.trim() && uploadedAttachments.length === 0) return;
 		sending = true;
 		sendError = '';
 		try {
 			await messagesApi.send({
-				body: body.trim(),
-				channel_id: channel.id
+				body: body.trim() || '(attachment)',
+				channel_id: channel.id,
+				attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.hash) : undefined
 			});
 			body = '';
+			uploadedAttachments = [];
 			await loadMessages();
 		} catch (err: any) {
 			sendError = err.message || 'Failed to send message';
@@ -270,6 +306,13 @@
 												<span class="text-xs text-text-secondary">{formatTime(msg.created_at)}</span>
 											</div>
 											<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
+											{#if msg.attachments?.length > 0}
+												<div class="flex flex-wrap gap-2 mt-1.5">
+													{#each msg.attachments as att}
+														<AttachmentPreview attachment={att} />
+													{/each}
+												</div>
+											{/if}
 											{#if msg.reply_count > 0}
 												<button
 													class="mt-1 flex items-center gap-1 text-xs text-accent-blue hover:underline"
@@ -310,6 +353,30 @@
 								Register an agent to send messages
 							</div>
 						{:else}
+							<!-- Hidden file input -->
+							<input
+								type="file"
+								class="hidden"
+								accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log"
+								bind:this={fileInputEl}
+								onchange={handleFileSelected}
+							/>
+							<!-- Attachment preview chips -->
+							{#if uploadedAttachments.length > 0}
+								<div class="flex flex-wrap gap-1.5 mb-1.5">
+									{#each uploadedAttachments as att}
+										<span class="inline-flex items-center gap-1 px-2 py-1 bg-bg-tertiary border border-border rounded text-xs text-text-primary">
+											<svg class="w-3 h-3 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" /></svg>
+											{att.name}
+											<span class="text-text-secondary">({formatFileSize(att.size)})</span>
+											<button class="ml-0.5 text-text-secondary hover:text-accent-red" onclick={() => removeAttachment(att.hash)} title="Remove">&times;</button>
+										</span>
+									{/each}
+								</div>
+							{/if}
+							{#if uploading}
+								<div class="mb-1.5 text-xs text-text-secondary">Uploading...</div>
+							{/if}
 							<div class="flex items-end gap-2 bg-bg-tertiary rounded-lg border border-border focus-within:border-border-active transition-colors">
 								<textarea
 									placeholder="Message #{channelName}..."
@@ -319,8 +386,18 @@
 									onkeydown={handleKeydown}
 								></textarea>
 								<button
+									class="p-2 mb-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-all"
+									onclick={triggerFileInput}
+									title="Attach file"
+									type="button"
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+									</svg>
+								</button>
+								<button
 									class="p-2 mr-1 mb-1 rounded-md bg-accent-green text-white hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-									disabled={sending || !body.trim()}
+									disabled={sending || (!body.trim() && uploadedAttachments.length === 0)}
 									onclick={handleSend}
 								>
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

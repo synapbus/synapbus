@@ -137,6 +137,8 @@ func (h *AttachmentsHandler) Upload(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"empty file not allowed"}`, http.StatusBadRequest)
 		case attachments.ErrFileTooLarge:
 			http.Error(w, `{"error":"file exceeds maximum size of 50MB"}`, http.StatusRequestEntityTooLarge)
+		case attachments.ErrUnsupportedType:
+			http.Error(w, `{"error":"unsupported file type: only images, PDFs, and text files are allowed"}`, http.StatusBadRequest)
 		default:
 			h.logger.Error("upload attachment failed", "error", err)
 			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)

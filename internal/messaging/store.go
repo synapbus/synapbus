@@ -39,6 +39,7 @@ type MessageStore interface {
 	GetLastReadForDM(ctx context.Context, agentNames []string, peerAgent string) (int64, error)
 	GetConversationIDsForChannel(ctx context.Context, channelID int64, lastMessageID int64) ([]int64, error)
 	GetConversationIDsForDM(ctx context.Context, agentNames []string, peerAgent string, lastMessageID int64) ([]int64, error)
+	GetReplyCounts(ctx context.Context, messageIDs []int64) (map[int64]int, error)
 }
 
 // SQLiteMessageStore implements MessageStore using SQLite.
@@ -1005,6 +1006,44 @@ func (s *SQLiteMessageStore) GetConversationIDsForDM(ctx context.Context, agentN
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// GetReplyCounts returns a map of message ID → reply count for the given IDs.
+func (s *SQLiteMessageStore) GetReplyCounts(ctx context.Context, messageIDs []int64) (map[int64]int, error) {
+	if len(messageIDs) == 0 {
+		return map[int64]int{}, nil
+	}
+
+	placeholders := make([]string, len(messageIDs))
+	args := make([]any, len(messageIDs))
+	for i, id := range messageIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT reply_to, COUNT(*) FROM messages
+		 WHERE reply_to IN (%s)
+		 GROUP BY reply_to`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get reply counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[int64]int)
+	for rows.Next() {
+		var replyTo int64
+		var count int
+		if err := rows.Scan(&replyTo, &count); err != nil {
+			return nil, fmt.Errorf("scan reply count: %w", err)
+		}
+		counts[replyTo] = count
+	}
+	return counts, rows.Err()
 }
 
 // scanMessage scans a single message from sql.Row.

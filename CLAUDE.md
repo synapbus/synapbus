@@ -103,6 +103,8 @@ make lint           # Run linters
 - Go 1.25+ (per go.mod) + go-chi/chi (HTTP), mark3labs/mcp-go (MCP), ory/fosite (OAuth), spf13/cobra (CLI), modernc.org/sqlite (storage), TFMV/hnsw (vectors). NEW: coreos/go-oidc/v3 (OIDC), golang.org/x/oauth2 (OAuth client) (007-platform-features-bundle)
 - Go 1.25+ (backend), SvelteKit 2 + Svelte 5 (frontend), SvelteKit (website) + go-chi/chi (HTTP), mark3labs/mcp-go (MCP), modernc.org/sqlite (storage), SherClockHolmes/webpush-go (push notifications — NEW) (008-webui-pwa-analytics)
 - SQLite (existing DB, 1 new migration for push_subscriptions), localStorage (font size) (008-webui-pwa-analytics)
+- Go 1.25+ (backend), Svelte 5 + Tailwind (frontend) + go-chi/chi (HTTP), mark3labs/mcp-go (MCP), modernc.org/sqlite (storage), spf13/cobra (CLI) (009-attachments-threads)
+- SQLite (modernc.org/sqlite, pure Go) + content-addressable filesystem (SHA-256) (009-attachments-threads)
 
 ## Recent Changes
 - 002-mcp-auth-ux-polish: Added Go 1.23+ + ory/fosite (OAuth 2.1), mark3labs/mcp-go (MCP server), go-chi/chi (HTTP), Svelte 5 + Tailwind (Web UI)

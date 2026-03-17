@@ -62,7 +62,7 @@ export const messages = {
 		return request<{ messages: any[]; total: number }>('GET', `/api/messages${q ? '?' + q : ''}`);
 	},
 	get: (id: number) => request<any>('GET', `/api/messages/${id}`),
-	send: (body: { from?: string; to?: string; body: string; priority?: number; subject?: string; channel_id?: number; conversation_id?: number; reply_to?: number }) =>
+	send: (body: { from?: string; to?: string; body: string; priority?: number; subject?: string; channel_id?: number; conversation_id?: number; reply_to?: number; attachments?: string[] }) =>
 		request<any>('POST', '/api/messages', body),
 	markDone: (id: number) => request<{ status: string }>('POST', `/api/messages/${id}/done`),
 	search: (q: string, opts?: { limit?: number; channel?: string; agent?: string; after?: string; before?: string }) => {
@@ -230,6 +230,24 @@ export const push = {
 export const profile = {
 	update: (body: { display_name: string }) =>
 		request<{ message: string; user: { id: number; username: string; display_name: string; role: string } }>('PUT', '/api/auth/profile', body)
+};
+
+// Attachments
+export const attachments = {
+	upload: async (file: File): Promise<{hash: string, size: number, mime_type: string, original_filename: string}> => {
+		const formData = new FormData();
+		formData.append('file', file);
+		const response = await fetch('/api/attachments', {
+			method: 'POST',
+			body: formData,
+			credentials: 'include'
+		});
+		if (!response.ok) {
+			const err = await response.json().catch(() => ({error: 'Upload failed'}));
+			throw new Error(err.error || err.detail || 'Upload failed');
+		}
+		return response.json();
+	}
 };
 
 export { ApiError };

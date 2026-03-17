@@ -1,6 +1,15 @@
 <script lang="ts">
 	import { openThread } from '$lib/stores/thread';
 	import MessageBody from '$lib/components/MessageBody.svelte';
+	import AttachmentPreview from '$lib/components/AttachmentPreview.svelte';
+
+	type Attachment = {
+		hash: string;
+		original_filename: string;
+		size: number;
+		mime_type: string;
+		is_image: boolean;
+	};
 
 	type Message = {
 		id: number;
@@ -12,6 +21,7 @@
 		status: string;
 		created_at: string;
 		reply_count?: number;
+		attachments?: Attachment[];
 	};
 
 	let { messages = [], showConversationLink = false, agentTypes = {} }: { messages: Message[]; showConversationLink?: boolean; agentTypes?: Record<string, string> } = $props();
@@ -108,8 +118,30 @@
 						</div>
 						<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} truncate={300} /></div>
 
-						<!-- Thread link -->
-						{#if showConversationLink && msg.conversation_id}
+						<!-- Attachments -->
+						{#if msg.attachments && msg.attachments.length > 0}
+							<div class="mt-2 flex flex-wrap gap-2">
+								{#each msg.attachments as att (att.hash)}
+									<AttachmentPreview attachment={att} />
+								{/each}
+							</div>
+						{/if}
+
+						<!-- Reply count badge -->
+						{#if msg.reply_count && msg.reply_count > 0}
+							<button
+								class="mt-1.5 flex items-center gap-1 text-xs text-text-link hover:underline"
+								onclick={(e) => { e.stopPropagation(); openThread(msg.id, msg.conversation_id, msg.from_agent); }}
+							>
+								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+								</svg>
+								{msg.reply_count === 1 ? '1 reply' : `${msg.reply_count} replies`}
+							</button>
+						{/if}
+
+						<!-- Thread link (conversation view) -->
+						{#if showConversationLink && msg.conversation_id && (!msg.reply_count || msg.reply_count === 0)}
 							<button
 								class="mt-1 flex items-center gap-1 text-xs text-text-link hover:underline"
 								onclick={(e) => { e.stopPropagation(); openThread(msg.id, msg.conversation_id, msg.from_agent); }}
@@ -117,7 +149,7 @@
 								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
 								</svg>
-								{msg.reply_count ? `${msg.reply_count} replies` : 'View thread'}
+								View thread
 							</button>
 						{/if}
 					</div>

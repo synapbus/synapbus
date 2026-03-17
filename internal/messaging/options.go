@@ -2,12 +2,13 @@ package messaging
 
 // SendOptions configures message sending behavior.
 type SendOptions struct {
-	Subject        string `json:"subject,omitempty"`
-	Priority       int    `json:"priority,omitempty"`
-	Metadata       string `json:"metadata,omitempty"`
-	ChannelID      *int64 `json:"channel_id,omitempty"`
-	ConversationID *int64 `json:"conversation_id,omitempty"`
-	ReplyTo        *int64 `json:"reply_to,omitempty"`
+	Subject        string   `json:"subject,omitempty"`
+	Priority       int      `json:"priority,omitempty"`
+	Metadata       string   `json:"metadata,omitempty"`
+	ChannelID      *int64   `json:"channel_id,omitempty"`
+	ConversationID *int64   `json:"conversation_id,omitempty"`
+	ReplyTo        *int64   `json:"reply_to,omitempty"`
+	Attachments    []string `json:"attachments,omitempty"` // attachment hashes to link
 }
 
 // ReadOptions configures inbox reading behavior.

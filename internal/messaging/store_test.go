@@ -1027,6 +1027,132 @@ func TestSQLiteMessageStore_GetChannelMessages_Offset(t *testing.T) {
 	})
 }
 
+func TestSQLiteMessageStore_GetReplyCounts(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "replier")
+
+	conv := &Conversation{Subject: "reply counts", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	// Insert parent message
+	parent := &Message{
+		ConversationID: conv.ID,
+		FromAgent:      "sender",
+		ToAgent:        "replier",
+		Body:           "parent message",
+		Priority:       5,
+		Status:         StatusPending,
+	}
+	if err := store.InsertMessage(ctx, parent); err != nil {
+		t.Fatalf("InsertMessage (parent): %v", err)
+	}
+
+	// Insert 3 replies to parent
+	for i := 0; i < 3; i++ {
+		reply := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "replier",
+			ToAgent:        "sender",
+			ReplyTo:        &parent.ID,
+			Body:           fmt.Sprintf("reply %d", i),
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, reply); err != nil {
+			t.Fatalf("InsertMessage (reply %d): %v", i, err)
+		}
+	}
+
+	t.Run("parent with 3 replies", func(t *testing.T) {
+		counts, err := store.GetReplyCounts(ctx, []int64{parent.ID})
+		if err != nil {
+			t.Fatalf("GetReplyCounts: %v", err)
+		}
+		if counts[parent.ID] != 3 {
+			t.Errorf("reply count for parent = %d, want 3", counts[parent.ID])
+		}
+	})
+
+	t.Run("message with no replies returns 0", func(t *testing.T) {
+		// Insert a message with no replies
+		noReply := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "replier",
+			Body:           "no replies here",
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, noReply); err != nil {
+			t.Fatalf("InsertMessage (noReply): %v", err)
+		}
+
+		counts, err := store.GetReplyCounts(ctx, []int64{noReply.ID})
+		if err != nil {
+			t.Fatalf("GetReplyCounts: %v", err)
+		}
+		if counts[noReply.ID] != 0 {
+			t.Errorf("reply count for noReply = %d, want 0", counts[noReply.ID])
+		}
+	})
+
+	t.Run("multiple parents", func(t *testing.T) {
+		// Insert a second parent with 2 replies
+		parent2 := &Message{
+			ConversationID: conv.ID,
+			FromAgent:      "sender",
+			ToAgent:        "replier",
+			Body:           "second parent",
+			Priority:       5,
+			Status:         StatusPending,
+		}
+		if err := store.InsertMessage(ctx, parent2); err != nil {
+			t.Fatalf("InsertMessage (parent2): %v", err)
+		}
+		for i := 0; i < 2; i++ {
+			reply := &Message{
+				ConversationID: conv.ID,
+				FromAgent:      "replier",
+				ToAgent:        "sender",
+				ReplyTo:        &parent2.ID,
+				Body:           fmt.Sprintf("reply to parent2 %d", i),
+				Priority:       5,
+				Status:         StatusPending,
+			}
+			if err := store.InsertMessage(ctx, reply); err != nil {
+				t.Fatalf("InsertMessage (parent2 reply %d): %v", i, err)
+			}
+		}
+
+		counts, err := store.GetReplyCounts(ctx, []int64{parent.ID, parent2.ID})
+		if err != nil {
+			t.Fatalf("GetReplyCounts: %v", err)
+		}
+		if counts[parent.ID] != 3 {
+			t.Errorf("reply count for parent = %d, want 3", counts[parent.ID])
+		}
+		if counts[parent2.ID] != 2 {
+			t.Errorf("reply count for parent2 = %d, want 2", counts[parent2.ID])
+		}
+	})
+
+	t.Run("empty slice returns empty map", func(t *testing.T) {
+		counts, err := store.GetReplyCounts(ctx, []int64{})
+		if err != nil {
+			t.Fatalf("GetReplyCounts: %v", err)
+		}
+		if len(counts) != 0 {
+			t.Errorf("expected empty map, got %v", counts)
+		}
+	})
+}
+
 func TestSQLiteMessageStore_CombinedFiltersAndPagination(t *testing.T) {
 	db := newTestDB(t)
 	store := NewSQLiteMessageStore(db)

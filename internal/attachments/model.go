@@ -11,10 +11,11 @@ const MaxFileSize = 50 * 1024 * 1024 // 50 MB
 
 // Sentinel errors.
 var (
-	ErrNotFound      = errors.New("attachment not found")
-	ErrFileTooLarge  = errors.New("file exceeds maximum size of 50MB")
-	ErrEmptyFile     = errors.New("empty file not allowed")
-	ErrFileMissing   = errors.New("attachment file missing from disk")
+	ErrNotFound        = errors.New("attachment not found")
+	ErrFileTooLarge    = errors.New("file exceeds maximum size of 50MB")
+	ErrEmptyFile       = errors.New("empty file not allowed")
+	ErrFileMissing     = errors.New("attachment file missing from disk")
+	ErrUnsupportedType = errors.New("unsupported file type: only images (jpg, png, gif, webp, svg), PDFs, and text files are allowed")
 )
 
 // Attachment represents the metadata for a stored file.

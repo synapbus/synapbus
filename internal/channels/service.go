@@ -465,7 +465,7 @@ func (s *Service) UpdateChannel(ctx context.Context, channelID int64, req Update
 // If the message body contains @mentions, mentioned members receive a
 // "mention":true flag in their inbox notification metadata, and the channel
 // message metadata includes "mentioned_agents".
-func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAgent, body string, priority int, metadata string, replyTo *int64) ([]*messaging.Message, error) {
+func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAgent, body string, priority int, metadata string, replyTo *int64, attachments []string) ([]*messaging.Message, error) {
 	ch, err := s.store.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, err
@@ -522,11 +522,12 @@ func (s *Service) BroadcastMessage(ctx context.Context, channelID int64, fromAge
 	channelMetaBytes, _ := json.Marshal(channelMetaObj)
 
 	channelMsg, err := s.msgService.SendMessage(ctx, fromAgent, "", body, messaging.SendOptions{
-		Subject:   fmt.Sprintf("channel:%s", ch.Name),
-		Priority:  priority,
-		Metadata:  string(channelMetaBytes),
-		ChannelID: &channelID,
-		ReplyTo:   replyTo,
+		Subject:     fmt.Sprintf("channel:%s", ch.Name),
+		Priority:    priority,
+		Metadata:    string(channelMetaBytes),
+		ChannelID:   &channelID,
+		ReplyTo:     replyTo,
+		Attachments: attachments,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create channel message: %w", err)

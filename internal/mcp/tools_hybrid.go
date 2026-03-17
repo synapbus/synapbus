@@ -84,14 +84,15 @@ func (h *HybridToolRegistrar) myStatusTool() mcplib.Tool {
 
 func (h *HybridToolRegistrar) sendMessageTool() mcplib.Tool {
 	return mcplib.NewTool("send_message",
-		mcplib.WithDescription("Send a message to another agent (DM) or to a channel. Specify exactly one of 'to' (agent name for DM) or 'channel' (channel name or numeric ID)."),
+		mcplib.WithDescription("Send a message to another agent (DM) or to a channel. Supports attachments — upload files first via the execute tool, then pass the returned hashes here. Specify exactly one of 'to' (agent name for DM) or 'channel' (channel name or numeric ID)."),
 		mcplib.WithString("to", mcplib.Description("Recipient agent name for direct messages")),
 		mcplib.WithString("channel", mcplib.Description("Channel name or numeric ID for channel messages")),
 		mcplib.WithString("body", mcplib.Description("Message body text"), mcplib.Required()),
 		mcplib.WithString("subject", mcplib.Description("Conversation subject (optional)")),
 		mcplib.WithNumber("priority", mcplib.Description("Message priority (1-10, default 5)"), mcplib.Min(1), mcplib.Max(10)),
 		mcplib.WithString("metadata", mcplib.Description("JSON metadata object (optional)")),
-		mcplib.WithNumber("reply_to", mcplib.Description("ID of the message to reply to (optional, for threading)")),
+		mcplib.WithNumber("reply_to", mcplib.Description("ID of the parent message to reply to. Creates a threaded reply. Always use reply_to when responding to a message that is itself a thread reply, to keep conversations organized.")),
+		mcplib.WithString("attachments", mcplib.Description("Comma-separated list of attachment hashes to link to this message. Upload attachments first using the upload_attachment action via the execute tool.")),
 	)
 }
 
@@ -323,6 +324,16 @@ func (h *HybridToolRegistrar) handleSendMessage(ctx context.Context, req mcplib.
 		replyTo = &v
 	}
 
+	var attachmentHashes []string
+	if attStr := req.GetString("attachments", ""); attStr != "" {
+		for _, h := range strings.Split(attStr, ",") {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				attachmentHashes = append(attachmentHashes, h)
+			}
+		}
+	}
+
 	// Channel message path.
 	if channel != "" {
 		if h.channelService == nil {
@@ -335,7 +346,7 @@ func (h *HybridToolRegistrar) handleSendMessage(ctx context.Context, req mcplib.
 			return mcplib.NewToolResultError(fmt.Sprintf("send_message to channel failed: %s", err)), nil
 		}
 
-		messages, err := h.channelService.BroadcastMessage(ctx, channelID, agentName, body, priority, metadataStr, replyTo)
+		messages, err := h.channelService.BroadcastMessage(ctx, channelID, agentName, body, priority, metadataStr, replyTo, attachmentHashes)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("send_message to channel failed: %s", err)), nil
 		}
@@ -345,19 +356,30 @@ func (h *HybridToolRegistrar) handleSendMessage(ctx context.Context, req mcplib.
 			messageID = messages[0].ID
 		}
 
-		return resultJSON(map[string]any{
+		result := map[string]any{
 			"channel_id": channelID,
 			"message_id": messageID,
 			"status":     "sent",
-		})
+		}
+
+		// Enrich channel messages with attachment info.
+		if len(messages) > 0 && len(attachmentHashes) > 0 {
+			h.msgService.EnrichMessages(ctx, messages)
+			if len(messages[0].Attachments) > 0 {
+				result["attachments"] = messages[0].Attachments
+			}
+		}
+
+		return resultJSON(result)
 	}
 
 	// DM path.
 	opts := messaging.SendOptions{
-		Subject:  subject,
-		Priority: priority,
-		Metadata: metadataStr,
-		ReplyTo:  replyTo,
+		Subject:     subject,
+		Priority:    priority,
+		Metadata:    metadataStr,
+		ReplyTo:     replyTo,
+		Attachments: attachmentHashes,
 	}
 
 	msg, err := h.msgService.SendMessage(ctx, agentName, to, body, opts)
@@ -365,11 +387,21 @@ func (h *HybridToolRegistrar) handleSendMessage(ctx context.Context, req mcplib.
 		return mcplib.NewToolResultError(fmt.Sprintf("send_message failed: %s", err)), nil
 	}
 
-	return resultJSON(map[string]any{
+	result := map[string]any{
 		"message_id":      msg.ID,
 		"conversation_id": msg.ConversationID,
 		"status":          msg.Status,
-	})
+	}
+
+	// Enrich message with attachment info.
+	if len(attachmentHashes) > 0 {
+		h.msgService.EnrichMessages(ctx, []*messaging.Message{msg})
+		if len(msg.Attachments) > 0 {
+			result["attachments"] = msg.Attachments
+		}
+	}
+
+	return resultJSON(result)
 }
 
 func (h *HybridToolRegistrar) handleSearch(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

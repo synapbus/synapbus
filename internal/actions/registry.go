@@ -425,7 +425,7 @@ func allActions() []Action {
 		{
 			Name:        "upload_attachment",
 			Category:    "attachments",
-			Description: "Upload a file attachment. Content must be base64-encoded. Returns the SHA-256 hash for later retrieval. Max file size: 50MB.",
+			Description: "Upload a file attachment. Content must be base64-encoded. Returns the SHA-256 hash for later retrieval. Upload first, then use the returned hash in send_message's attachments parameter to link it to a message. Max file size: 50MB.",
 			Params: []Param{
 				{Name: "content", Type: "string", Description: "Base64-encoded file content", Required: true},
 				{Name: "filename", Type: "string", Description: "Original filename (optional, used for MIME detection and display)"},

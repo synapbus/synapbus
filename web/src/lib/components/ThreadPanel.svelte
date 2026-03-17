@@ -2,6 +2,7 @@
 	import { activeThread, closeThread } from '$lib/stores/thread';
 	import { conversations as convsApi, messages as messagesApi } from '$lib/api/client';
 	import MessageBody from '$lib/components/MessageBody.svelte';
+	import AttachmentPreview from '$lib/components/AttachmentPreview.svelte';
 
 	let conversation = $state<any>(null);
 	let threadMessages = $state<any[]>([]);
@@ -164,6 +165,13 @@
 									{/if}
 								</div>
 								<div class="text-xs text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
+								{#if msg.attachments && msg.attachments.length > 0}
+									<div class="mt-1.5 flex flex-wrap gap-1.5">
+										{#each msg.attachments as att (att.hash)}
+											<AttachmentPreview attachment={att} />
+										{/each}
+									</div>
+								{/if}
 							</div>
 						</div>
 					</div>

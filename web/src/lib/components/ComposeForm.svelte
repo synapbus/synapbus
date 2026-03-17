@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { messages as messagesApi, agents as agentsApi, channels as channelsApi } from '$lib/api/client';
+	import { messages as messagesApi, agents as agentsApi, channels as channelsApi, attachments as attachmentsApi } from '$lib/api/client';
 
 	let { onSent = () => {} }: { onSent?: () => void } = $props();
 
@@ -11,6 +11,49 @@
 	let sending = $state(false);
 	let error = $state('');
 	let showOptions = $state(false);
+
+	// Attachment state
+	type UploadedAttachment = { hash: string; original_filename: string; size: number; mime_type: string };
+	let uploadedAttachments = $state<UploadedAttachment[]>([]);
+	let uploading = $state(false);
+	let uploadError = $state('');
+	let fileInputEl: HTMLInputElement | undefined = $state(undefined);
+
+	const ACCEPTED_FILES = '.jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log';
+
+	function formatFileSize(bytes: number): string {
+		if (bytes < 1024 * 1024) {
+			return (bytes / 1024).toFixed(1) + ' KB';
+		}
+		return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+	}
+
+	function triggerFileInput() {
+		fileInputEl?.click();
+	}
+
+	async function handleFileSelected(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		uploading = true;
+		uploadError = '';
+		try {
+			const result = await attachmentsApi.upload(file);
+			uploadedAttachments = [...uploadedAttachments, result];
+		} catch (err: any) {
+			uploadError = err.message || 'Upload failed';
+		} finally {
+			uploading = false;
+			// Reset file input so same file can be re-selected
+			if (fileInputEl) fileInputEl.value = '';
+		}
+	}
+
+	function removeAttachment(hash: string) {
+		uploadedAttachments = uploadedAttachments.filter(a => a.hash !== hash);
+	}
 
 	// Autocomplete state
 	let agentList = $state<any[]>([]);
@@ -102,13 +145,16 @@
 				body: body.trim(),
 				priority,
 				subject: subject.trim() || undefined,
-				channel_id: channelId
+				channel_id: channelId,
+				attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.hash) : undefined
 			});
 			to = '';
 			body = '';
 			priority = 5;
 			subject = '';
 			channelId = undefined;
+			uploadedAttachments = [];
+			uploadError = '';
 			if (textareaEl) {
 				textareaEl.style.height = '72px';
 				textareaEl.style.overflowY = 'hidden';
@@ -211,14 +257,71 @@
 		</div>
 	{/if}
 
+	<!-- Hidden file input -->
+	<input
+		bind:this={fileInputEl}
+		type="file"
+		accept={ACCEPTED_FILES}
+		class="hidden"
+		onchange={handleFileSelected}
+	/>
+
+	<!-- Attachment list -->
+	{#if uploadedAttachments.length > 0 || uploading || uploadError}
+		<div class="px-4 py-2 border-t border-border space-y-1">
+			{#if uploadError}
+				<div class="text-xs text-accent-red">{uploadError}</div>
+			{/if}
+			{#if uploading}
+				<div class="flex items-center gap-2 text-xs text-text-secondary">
+					<svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+					</svg>
+					Uploading...
+				</div>
+			{/if}
+			{#each uploadedAttachments as att (att.hash)}
+				<div class="flex items-center gap-2 text-xs text-text-primary bg-bg-tertiary rounded px-2 py-1">
+					<svg class="w-3.5 h-3.5 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+					</svg>
+					<span class="truncate flex-1">{att.original_filename}</span>
+					<span class="text-text-secondary flex-shrink-0">{formatFileSize(att.size)}</span>
+					<button
+						class="p-0.5 rounded hover:bg-bg-secondary text-text-secondary hover:text-accent-red transition-colors flex-shrink-0"
+						onclick={() => removeAttachment(att.hash)}
+						title="Remove attachment"
+					>
+						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Bottom bar -->
 	<div class="flex items-center justify-between px-3 py-2 border-t border-border">
-		<button
-			class="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1 rounded hover:bg-bg-tertiary"
-			onclick={() => (showOptions = !showOptions)}
-		>
-			{showOptions ? 'Hide options' : 'Options'}
-		</button>
+		<div class="flex items-center gap-1">
+			<button
+				class="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1 rounded hover:bg-bg-tertiary"
+				onclick={() => (showOptions = !showOptions)}
+			>
+				{showOptions ? 'Hide options' : 'Options'}
+			</button>
+			<button
+				class="p-1.5 rounded text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors disabled:opacity-50"
+				onclick={triggerFileInput}
+				disabled={uploading}
+				title="Attach file"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+				</svg>
+			</button>
+		</div>
 		<button
 			class="px-4 py-1.5 bg-accent-green rounded text-xs font-semibold text-white hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
 			disabled={sending || !body.trim() || !to.trim()}

@@ -86,6 +86,8 @@ func (h *MessagesHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		allMessages = []*messaging.Message{}
 	}
 
+	h.msgService.EnrichMessages(r.Context(), allMessages)
+
 	sortMessagesByTime(allMessages)
 	if len(allMessages) > limit {
 		allMessages = allMessages[:limit]
@@ -121,6 +123,8 @@ func (h *MessagesHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, errorBody("forbidden", "You do not have access to this message"))
 		return
 	}
+
+	h.msgService.EnrichMessages(r.Context(), []*messaging.Message{msg})
 
 	writeJSON(w, http.StatusOK, msg)
 }
@@ -230,6 +234,8 @@ func (h *MessagesHandler) GetConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	h.msgService.EnrichMessages(r.Context(), messages)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"conversation": conv,
 		"messages":     messages,
@@ -245,14 +251,15 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		From           string `json:"from"`
-		To             string `json:"to"`
-		Body           string `json:"body"`
-		Priority       int    `json:"priority"`
-		ChannelID      *int64 `json:"channel_id,omitempty"`
-		ConversationID *int64 `json:"conversation_id,omitempty"`
-		Subject        string `json:"subject,omitempty"`
-		ReplyTo        *int64 `json:"reply_to,omitempty"`
+		From           string   `json:"from"`
+		To             string   `json:"to"`
+		Body           string   `json:"body"`
+		Priority       int      `json:"priority"`
+		ChannelID      *int64   `json:"channel_id,omitempty"`
+		ConversationID *int64   `json:"conversation_id,omitempty"`
+		Subject        string   `json:"subject,omitempty"`
+		ReplyTo        *int64   `json:"reply_to,omitempty"`
+		Attachments    []string `json:"attachments,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -307,6 +314,7 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		ConversationID: req.ConversationID,
 		Subject:        req.Subject,
 		ReplyTo:        req.ReplyTo,
+		Attachments:    req.Attachments,
 	}
 
 	msg, err := h.msgService.SendMessage(r.Context(), req.From, req.To, req.Body, opts)
@@ -318,6 +326,8 @@ func (h *MessagesHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// SSE broadcast is handled by the MessageListener on the messaging
 	// service, so it fires for both REST and MCP message paths.
+
+	h.msgService.EnrichMessages(r.Context(), []*messaging.Message{msg})
 
 	writeJSON(w, http.StatusCreated, msg)
 }
@@ -465,6 +475,8 @@ func (h *MessagesHandler) SearchMessages(w http.ResponseWriter, r *http.Request)
 		allMessages = []*messaging.Message{}
 	}
 
+	h.msgService.EnrichMessages(r.Context(), allMessages)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"messages": allMessages,
 		"query":    query,
@@ -504,6 +516,8 @@ func (h *MessagesHandler) GetReplies(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to get replies"))
 		return
 	}
+
+	h.msgService.EnrichMessages(r.Context(), replies)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"replies": replies,
@@ -549,6 +563,8 @@ func (h *MessagesHandler) DMMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to get messages"))
 		return
 	}
+
+	h.msgService.EnrichMessages(r.Context(), msgs)
 
 	// Include last_read_message_id for the human agent's DM with the peer
 	lastRead, _ := h.msgService.GetLastReadForDM(r.Context(), agentNames, peerAgent)

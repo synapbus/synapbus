@@ -24,12 +24,20 @@ type MessageListener interface {
 	OnMessageSent(ctx context.Context, msg *Message)
 }
 
+// AttachmentLinker links attachment hashes to message IDs. This avoids
+// importing the attachments package directly. Set via SetAttachmentLinker.
+type AttachmentLinker interface {
+	AttachToMessage(ctx context.Context, hash string, messageID int64) error
+	GetByMessageID(ctx context.Context, messageID int64) ([]AttachmentInfo, error)
+}
+
 // MessagingService provides business logic for messaging operations.
 type MessagingService struct {
 	store      MessageStore
 	tracer     *trace.Tracer
 	dispatcher dispatcher.EventDispatcher
 	embeddings EmbeddingNotifier
+	attLinker  AttachmentLinker
 	listeners  []MessageListener
 	logger     *slog.Logger
 }
@@ -51,6 +59,11 @@ func (s *MessagingService) SetDispatcher(d dispatcher.EventDispatcher) {
 // SetEmbeddingNotifier sets the embedding pipeline callback for new messages.
 func (s *MessagingService) SetEmbeddingNotifier(n EmbeddingNotifier) {
 	s.embeddings = n
+}
+
+// SetAttachmentLinker sets the attachment linker for message-attachment binding.
+func (s *MessagingService) SetAttachmentLinker(l AttachmentLinker) {
+	s.attLinker = l
 }
 
 // AddMessageListener registers a listener that is notified after message creation.
@@ -143,6 +156,19 @@ func (s *MessagingService) SendMessage(ctx context.Context, from, to, body strin
 
 	if err := s.store.InsertMessage(ctx, msg); err != nil {
 		return nil, fmt.Errorf("insert message: %w", err)
+	}
+
+	// Link attachments if provided.
+	if s.attLinker != nil && len(opts.Attachments) > 0 {
+		for _, hash := range opts.Attachments {
+			if err := s.attLinker.AttachToMessage(ctx, hash, msg.ID); err != nil {
+				s.logger.Error("failed to link attachment",
+					"hash", hash,
+					"message_id", msg.ID,
+					"error", err,
+				)
+			}
+		}
 	}
 
 	// Enqueue for embedding (async, best-effort)
@@ -521,6 +547,44 @@ func (s *MessagingService) GetConversationIDsForChannel(ctx context.Context, cha
 // GetConversationIDsForDM returns conversation IDs for DMs between owned agents and a peer.
 func (s *MessagingService) GetConversationIDsForDM(ctx context.Context, agentNames []string, peerAgent string, lastMessageID int64) ([]int64, error) {
 	return s.store.GetConversationIDsForDM(ctx, agentNames, peerAgent, lastMessageID)
+}
+
+// EnrichMessages populates ReplyCount and Attachments on a slice of messages.
+func (s *MessagingService) EnrichMessages(ctx context.Context, msgs []*Message) {
+	if len(msgs) == 0 {
+		return
+	}
+
+	ids := make([]int64, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
+
+	// Batch-load reply counts.
+	counts, err := s.store.GetReplyCounts(ctx, ids)
+	if err != nil {
+		s.logger.Error("failed to load reply counts", "error", err)
+	} else {
+		for _, m := range msgs {
+			if c, ok := counts[m.ID]; ok {
+				m.ReplyCount = c
+			}
+		}
+	}
+
+	// Batch-load attachments.
+	if s.attLinker != nil {
+		for _, m := range msgs {
+			atts, err := s.attLinker.GetByMessageID(ctx, m.ID)
+			if err != nil {
+				s.logger.Error("failed to load attachments", "message_id", m.ID, "error", err)
+				continue
+			}
+			if len(atts) > 0 {
+				m.Attachments = atts
+			}
+		}
+	}
 }
 
 // GetConversation returns a conversation and its messages.

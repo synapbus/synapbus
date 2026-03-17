@@ -533,7 +533,7 @@ func TestService_BroadcastMessage(t *testing.T) {
 	ch, _ := svc.CreateChannel(ctx, CreateChannelRequest{Name: "alerts", Type: TypeStandard, CreatedBy: "agent-a"})
 
 	t.Run("broadcast creates channel message", func(t *testing.T) {
-		msgs, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "hello", 5, "", nil)
+		msgs, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "hello", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
@@ -568,7 +568,7 @@ func TestService_BroadcastMessage(t *testing.T) {
 	t.Run("broadcast without mentions sends no DMs", func(t *testing.T) {
 		svc.JoinChannel(ctx, ch.ID, "agent-b")
 		svc.JoinChannel(ctx, ch.ID, "agent-c")
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "no-dm-test", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "no-dm-test", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
@@ -583,7 +583,7 @@ func TestService_BroadcastMessage(t *testing.T) {
 	})
 
 	t.Run("sender does not receive own message", func(t *testing.T) {
-		svc.BroadcastMessage(ctx, ch.ID, "agent-a", "no self-message", 5, "", nil)
+		svc.BroadcastMessage(ctx, ch.ID, "agent-a", "no self-message", 5, "", nil, nil)
 		inboxResult, _ := svc.msgService.ReadInbox(ctx, "agent-a", messaging.ReadOptions{IncludeRead: true})
 		for _, m := range inboxResult.Messages {
 			if m.Body == "no self-message" {
@@ -594,7 +594,7 @@ func TestService_BroadcastMessage(t *testing.T) {
 
 	t.Run("non-member auto-joins public channel on broadcast", func(t *testing.T) {
 		seedAgent(t, svc.store.(*SQLiteChannelStore).db, "outsider")
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "outsider", "auto-joined", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "outsider", "auto-joined", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("expected auto-join for public channel, got %v", err)
 		}
@@ -605,10 +605,10 @@ func TestService_BroadcastMessage(t *testing.T) {
 	})
 
 	t.Run("broadcast with reply_to", func(t *testing.T) {
-		msgs, _ := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "original", 5, "", nil)
+		msgs, _ := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "original", 5, "", nil, nil)
 		original := msgs[0]
 
-		replies, err := svc.BroadcastMessage(ctx, ch.ID, "agent-b", "reply to original", 5, "", &original.ID)
+		replies, err := svc.BroadcastMessage(ctx, ch.ID, "agent-b", "reply to original", 5, "", &original.ID, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage with reply_to: %v", err)
 		}
@@ -625,7 +625,7 @@ func TestService_BroadcastMessage(t *testing.T) {
 			t.Fatalf("create private channel: %v", err)
 		}
 		seedAgent(t, svc.store.(*SQLiteChannelStore).db, "outsider2")
-		_, err = svc.BroadcastMessage(ctx, privCh.ID, "outsider2", "unauthorized", 5, "", nil)
+		_, err = svc.BroadcastMessage(ctx, privCh.ID, "outsider2", "unauthorized", 5, "", nil, nil)
 		if !errors.Is(err, ErrNotChannelMember) {
 			t.Errorf("expected ErrNotChannelMember for private channel, got %v", err)
 		}
@@ -644,7 +644,7 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 	svc.JoinChannel(ctx, ch.ID, "agent-c")
 
 	t.Run("mentioned member gets mention flag in inbox", func(t *testing.T) {
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "hey @agent-b check this", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "hey @agent-b check this", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
@@ -677,7 +677,7 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 	})
 
 	t.Run("channel message metadata includes mentioned_agents", func(t *testing.T) {
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "cc @agent-b and @agent-c", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "cc @agent-b and @agent-c", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
@@ -707,7 +707,7 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 	})
 
 	t.Run("self-mention is excluded", func(t *testing.T) {
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "I am @agent-a and cc @agent-b", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "I am @agent-a and cc @agent-b", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
@@ -732,7 +732,7 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 	})
 
 	t.Run("no mentions produces no mention metadata", func(t *testing.T) {
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "just a normal message", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "just a normal message", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}
@@ -752,7 +752,7 @@ func TestService_BroadcastMessage_Mentions(t *testing.T) {
 
 	t.Run("non-member mention is ignored", func(t *testing.T) {
 		seedAgent(t, svc.store.(*SQLiteChannelStore).db, "outsider")
-		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "hey @outsider and @agent-b", 5, "", nil)
+		_, err := svc.BroadcastMessage(ctx, ch.ID, "agent-a", "hey @outsider and @agent-b", 5, "", nil, nil)
 		if err != nil {
 			t.Fatalf("BroadcastMessage: %v", err)
 		}

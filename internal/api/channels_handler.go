@@ -228,6 +228,9 @@ func (h *ChannelsHandler) ChannelMessages(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Enrich messages with reply counts and attachments.
+	h.msgService.EnrichMessages(r.Context(), paginated.Messages)
+
 	// Compute last_read_message_id across owned agents
 	var lastReadMessageID int64
 	ownedAgents, err := h.agentService.ListAgents(r.Context(), ownerID)
