@@ -51,6 +51,22 @@
 		showSuggestions = false;
 	}
 
+	let textareaEl: HTMLTextAreaElement | undefined = $state(undefined);
+
+	function autoResize() {
+		if (!textareaEl) return;
+		textareaEl.style.height = 'auto';
+		const maxHeight = 240; // ~12 lines
+		const scrollHeight = textareaEl.scrollHeight;
+		if (scrollHeight > maxHeight) {
+			textareaEl.style.height = maxHeight + 'px';
+			textareaEl.style.overflowY = 'auto';
+		} else {
+			textareaEl.style.height = scrollHeight + 'px';
+			textareaEl.style.overflowY = 'hidden';
+		}
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
@@ -84,6 +100,10 @@
 			priority = 5;
 			subject = '';
 			channelId = undefined;
+			if (textareaEl) {
+				textareaEl.style.height = '72px';
+				textareaEl.style.overflowY = 'hidden';
+			}
 			onSent();
 		} catch (err: any) {
 			error = err.message || 'Failed to send message';
@@ -140,11 +160,14 @@
 
 	<!-- Message body -->
 	<textarea
+		bind:this={textareaEl}
 		placeholder="Write a message..."
-		class="w-full px-4 py-3 bg-transparent text-sm text-text-primary placeholder-text-secondary resize-none outline-none min-h-[80px]"
+		class="w-full px-4 py-3 bg-transparent text-sm text-text-primary placeholder-text-secondary resize-none outline-none"
+		style="min-height: 72px; max-height: 240px;"
 		bind:value={body}
 		rows="3"
 		onkeydown={handleKeydown}
+		oninput={autoResize}
 	></textarea>
 
 	<!-- Options row -->

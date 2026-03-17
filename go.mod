@@ -3,6 +3,7 @@ module github.com/synapbus/synapbus
 go 1.25.0
 
 require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/TFMV/hnsw v0.4.0
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
@@ -50,6 +51,7 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/gobuffalo/pop/v6 v6.1.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect

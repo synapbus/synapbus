@@ -1,28 +1,50 @@
 <script lang="ts">
-	import { messages as messagesApi, conversations as convsApi, agents as agentsApi } from '$lib/api/client';
+	import { analytics, messages as messagesApi, conversations as convsApi, agents as agentsApi } from '$lib/api/client';
 	import MessageList from '$lib/components/MessageList.svelte';
 	import ComposeForm from '$lib/components/ComposeForm.svelte';
+	import AnalyticsChart from '$lib/components/AnalyticsChart.svelte';
+	import TopList from '$lib/components/TopList.svelte';
 
 	let recentMessages = $state<any[]>([]);
 	let recentConversations = $state<any[]>([]);
-	let agentCount = $state(0);
 	let agentTypeMap = $state<Record<string, string>>({});
 	let loadingData = $state(true);
 	let showCompose = $state(false);
 
+	// Analytics state
+	let span = $state('24h');
+	let timelineBuckets = $state<{ time: string; count: number }[]>([]);
+	let topAgents = $state<any[]>([]);
+	let topChannels = $state<any[]>([]);
+	let summary = $state<{ total_agents: number; total_channels: number; total_messages: number }>({
+		total_agents: 0,
+		total_channels: 0,
+		total_messages: 0
+	});
+	let loadingAnalytics = $state(false);
+
+	const spans = [
+		{ value: '1h', label: '1H' },
+		{ value: '4h', label: '4H' },
+		{ value: '24h', label: '24H' },
+		{ value: '7d', label: '7D' },
+		{ value: '30d', label: '1M' }
+	];
+
 	async function loadData() {
 		loadingData = true;
 		try {
-			const [msgRes, convRes, agentRes] = await Promise.all([
+			const [msgRes, convRes, agentRes, summaryRes] = await Promise.all([
 				messagesApi.list({ limit: 20 }),
 				convsApi.list(),
-				agentsApi.list()
+				agentsApi.list(),
+				analytics.summary()
 			]);
 			recentMessages = msgRes.messages;
 			recentConversations = convRes.conversations;
-			agentCount = agentRes.agents.length;
+			summary = summaryRes;
 			const typeMap: Record<string, string> = {};
-			for (const agent of agentRes.agents) {
+			for (const agent of (agentRes.agents ?? [])) {
 				typeMap[agent.name] = agent.type;
 			}
 			agentTypeMap = typeMap;
@@ -31,6 +53,33 @@
 		} finally {
 			loadingData = false;
 		}
+		await loadAnalytics();
+	}
+
+	async function loadAnalytics() {
+		loadingAnalytics = true;
+		try {
+			const [timelineRes, agentsRes, channelsRes] = await Promise.all([
+				analytics.timeline(span),
+				analytics.topAgents(span),
+				analytics.topChannels(span)
+			]);
+			timelineBuckets = timelineRes.buckets ?? [];
+			topAgents = agentsRes.agents ?? [];
+			topChannels = channelsRes.channels ?? [];
+		} catch {
+			// Analytics may not be available yet
+			timelineBuckets = [];
+			topAgents = [];
+			topChannels = [];
+		} finally {
+			loadingAnalytics = false;
+		}
+	}
+
+	function switchSpan(s: string) {
+		span = s;
+		loadAnalytics();
 	}
 
 	let _initialized = $state(false);
@@ -42,7 +91,7 @@
 	});
 </script>
 
-<div class="p-5 max-w-5xl">
+<div class="p-5 max-w-6xl">
 	<!-- Top bar -->
 	<div class="flex items-center justify-between mb-5">
 		<div>
@@ -70,20 +119,69 @@
 		</div>
 	{/if}
 
-	<!-- Stats -->
-	<div class="grid grid-cols-3 gap-3 mb-5">
+	<!-- Summary Cards -->
+	<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
 		<div class="card p-4">
-			<p class="text-xs text-text-secondary mb-1">Messages</p>
-			<p class="text-2xl font-bold text-text-primary font-display">{loadingData ? '-' : recentMessages.length}</p>
+			<p class="text-xs text-text-secondary mb-1">Total Messages</p>
+			<p class="text-2xl font-bold text-text-primary font-display">{loadingData ? '-' : summary.total_messages}</p>
+		</div>
+		<div class="card p-4">
+			<p class="text-xs text-text-secondary mb-1">Agents</p>
+			<p class="text-2xl font-bold text-text-primary font-display">{loadingData ? '-' : summary.total_agents}</p>
+		</div>
+		<div class="card p-4">
+			<p class="text-xs text-text-secondary mb-1">Channels</p>
+			<p class="text-2xl font-bold text-text-primary font-display">{loadingData ? '-' : summary.total_channels}</p>
 		</div>
 		<div class="card p-4">
 			<p class="text-xs text-text-secondary mb-1">Conversations</p>
 			<p class="text-2xl font-bold text-text-primary font-display">{loadingData ? '-' : recentConversations.length}</p>
 		</div>
-		<div class="card p-4">
-			<p class="text-xs text-text-secondary mb-1">Agents</p>
-			<p class="text-2xl font-bold text-text-primary font-display">{loadingData ? '-' : agentCount}</p>
+	</div>
+
+	<!-- Message Activity Chart -->
+	<div class="card mb-5">
+		<div class="px-5 py-3 border-b border-border flex items-center justify-between">
+			<h2 class="font-semibold text-sm text-text-primary font-display">Message Activity</h2>
+			<div class="flex gap-1">
+				{#each spans as s}
+					<button
+						class="px-2.5 py-1 text-xs rounded transition-colors {span === s.value
+							? 'bg-accent-blue text-white font-semibold'
+							: 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'}"
+						onclick={() => switchSpan(s.value)}
+					>
+						{s.label}
+					</button>
+				{/each}
+			</div>
 		</div>
+		<div class="p-4">
+			{#if loadingAnalytics}
+				<div class="flex items-center justify-center h-[160px]">
+					<div class="w-6 h-6 border-2 border-border-active border-t-accent-blue rounded-full animate-spin"></div>
+				</div>
+			{:else}
+				<AnalyticsChart buckets={timelineBuckets} {span} />
+			{/if}
+		</div>
+	</div>
+
+	<!-- Top 5 Lists -->
+	<div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+		<TopList
+			title="Top 5 Agents"
+			items={topAgents}
+			linkPrefix="/agents/"
+			nameField="name"
+			displayField="display_name"
+		/>
+		<TopList
+			title="Top 5 Channels"
+			items={topChannels}
+			linkPrefix="/channels/"
+			nameField="name"
+		/>
 	</div>
 
 	<!-- Recent Conversations -->
@@ -141,7 +239,7 @@
 		{/if}
 	</div>
 
-	{#if !loadingData && recentMessages.length === 0 && agentCount === 0}
+	{#if !loadingData && recentMessages.length === 0 && summary.total_agents === 0}
 		<div class="card p-10 text-center mt-5">
 			<div class="w-12 h-12 mx-auto rounded-2xl bg-gradient-to-br from-accent-purple/20 to-[#06b6d4]/20 flex items-center justify-center mb-4">
 				<svg class="w-7 h-7" viewBox="0 0 24 24" fill="none">

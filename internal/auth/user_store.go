@@ -23,6 +23,7 @@ type UserStore interface {
 	ListUsers(ctx context.Context) ([]*User, error)
 	CountUsers(ctx context.Context) (int, error)
 	VerifyPassword(ctx context.Context, username, password string) (*User, error)
+	UpdateDisplayName(ctx context.Context, userID int64, displayName string) error
 }
 
 // SQLiteUserStore implements UserStore using SQLite.
@@ -245,4 +246,27 @@ func (s *SQLiteUserStore) VerifyPassword(ctx context.Context, username, password
 	}
 
 	return user, nil
+}
+
+// UpdateDisplayName changes a user's display name.
+func (s *SQLiteUserStore) UpdateDisplayName(ctx context.Context, userID int64, displayName string) error {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return fmt.Errorf("display name cannot be empty")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE users SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		displayName, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("update display name: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }

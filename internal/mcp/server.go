@@ -141,6 +141,7 @@ func NewMCPServer(
 		"SynapBus",
 		"0.1.0",
 		server.WithToolCapabilities(true),
+		server.WithPromptCapabilities(true),
 		server.WithHooks(hooks),
 	)
 
@@ -158,6 +159,11 @@ func NewMCPServer(
 		db,
 	)
 	hybridRegistrar.RegisterAllOnServer(mcpSrv)
+
+	// Register the 4 MCP prompts
+	traceStore := trace.NewSQLiteTraceStore(db)
+	promptRegistrar := NewPromptRegistrar(db, agentService, channelService, traceStore)
+	promptRegistrar.RegisterAllOnServer(mcpSrv)
 
 	// Create Streamable HTTP transport with context func for auth propagation
 	httpServer := server.NewStreamableHTTPServer(mcpSrv,
@@ -183,7 +189,7 @@ func NewMCPServer(
 		console:      consolePrinter,
 	}
 
-	logger.Info("MCP server initialized (4 hybrid tools, streamable HTTP transport)")
+	logger.Info("MCP server initialized (4 hybrid tools, 4 prompts, streamable HTTP transport)")
 	return s
 }
 

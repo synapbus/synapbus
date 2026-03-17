@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,7 @@ import (
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/k8s"
 	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/webhooks"
 )
@@ -30,9 +32,12 @@ type RouterConfig struct {
 	WebhookStore      webhooks.WebhookStore
 	K8sService        *k8s.K8sService
 	K8sStore          k8s.K8sStore
+	PushService       *push.Service
 	SSEHub            *SSEHub
 	Broadcaster       *SSEBroadcaster
 	SessionMiddleware func(http.Handler) http.Handler
+	DB                *sql.DB
+	Version           string
 }
 
 // NewRouter creates a chi router with all API routes configured.
@@ -196,6 +201,38 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 				r.Get("/api/k8s/job-runs/{id}/logs", k8sHandler.JobRunLogs)
 			})
 		}
+
+		// Push Notifications
+		if cfg.PushService != nil {
+			pushHandler := NewPushHandler(cfg.PushService)
+			// VAPID key endpoint is unauthenticated (needed before subscription)
+			r.Get("/api/push/vapid-key", pushHandler.VAPIDKey)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware)
+
+				r.Post("/api/push/subscribe", pushHandler.Subscribe)
+				r.Delete("/api/push/subscribe", pushHandler.Unsubscribe)
+			})
+		}
+	}
+
+	// Analytics (authenticated, requires DB)
+	if cfg.DB != nil {
+		analyticsHandler := NewAnalyticsHandler(cfg.DB, cfg.AgentService, cfg.ChannelService)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+
+			r.Get("/api/analytics/timeline", analyticsHandler.Timeline)
+			r.Get("/api/analytics/top-agents", analyticsHandler.TopAgents)
+			r.Get("/api/analytics/top-channels", analyticsHandler.TopChannels)
+			r.Get("/api/analytics/summary", analyticsHandler.Summary)
+		})
+	}
+
+	// Version (unauthenticated)
+	if cfg.Version != "" {
+		versionHandler := NewVersionHandler(cfg.Version)
+		r.Get("/api/version", versionHandler.GetVersion)
 	}
 
 	// Metrics endpoint (unauthenticated, only registered when enabled)

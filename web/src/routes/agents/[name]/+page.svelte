@@ -12,6 +12,12 @@
 	let deleting = $state(false);
 	let confirmDelete = $state(false);
 
+	// Inline name editing
+	let editingName = $state(false);
+	let editNameValue = $state('');
+	let savingName = $state(false);
+	let nameError = $state('');
+
 	// Access Rights state
 	let allowedChannels = $state('');
 	let readOnly = $state(false);
@@ -80,6 +86,39 @@
 		}
 	}
 
+	function startEditName() {
+		editNameValue = agent.display_name || agent.name;
+		editingName = true;
+		nameError = '';
+	}
+
+	async function saveDisplayName() {
+		if (!editNameValue.trim()) {
+			nameError = 'Name cannot be empty';
+			return;
+		}
+		savingName = true;
+		nameError = '';
+		try {
+			const res = await agentsApi.update(agentName, { display_name: editNameValue.trim() });
+			agent = res.agent;
+			editingName = false;
+		} catch (err: any) {
+			nameError = err.message || 'Failed to update name';
+		} finally {
+			savingName = false;
+		}
+	}
+
+	function handleNameKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			saveDisplayName();
+		} else if (e.key === 'Escape') {
+			editingName = false;
+		}
+	}
+
 	async function handleSaveAccess() {
 		savingAccess = true;
 		accessError = '';
@@ -135,10 +174,36 @@
 							{(agent.display_name || agent.name).charAt(0).toUpperCase()}
 						</div>
 						<div>
-							<h1 class="text-lg font-bold text-text-primary font-display">{agent.display_name || agent.name}</h1>
-							{#if agent.display_name}
-								<p class="text-xs text-text-secondary font-mono">@{agent.name}</p>
+							{#if editingName}
+								<div class="flex items-center gap-2">
+									<input
+										type="text"
+										class="input text-lg font-bold py-0.5 px-2 w-48"
+										bind:value={editNameValue}
+										onkeydown={handleNameKeydown}
+										onblur={saveDisplayName}
+										autofocus
+									/>
+									{#if savingName}
+										<span class="text-xs text-text-secondary">Saving...</span>
+									{/if}
+								</div>
+								{#if nameError}
+									<p class="text-xs text-accent-red mt-0.5">{nameError}</p>
+								{/if}
+							{:else}
+								<h1
+									class="text-lg font-bold text-text-primary font-display cursor-pointer hover:text-accent-blue transition-colors"
+									onclick={startEditName}
+									title="Click to edit display name"
+								>
+									{agent.display_name || agent.name}
+									<svg class="w-3.5 h-3.5 inline-block ml-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+									</svg>
+								</h1>
 							{/if}
+							<p class="text-xs text-text-secondary font-mono">@{agent.name}</p>
 						</div>
 					</div>
 					<div class="flex items-center gap-2">

@@ -200,4 +200,36 @@ export const notificationsApi = {
 		request<{ status: string }>('POST', '/api/notifications/mark-read', { type, target, last_message_id: lastMessageId })
 };
 
+// Analytics
+export const analytics = {
+	timeline: (span = '24h') =>
+		request<{ span: string; buckets: { time: string; count: number }[]; total: number }>('GET', `/api/analytics/timeline?span=${span}`),
+	topAgents: (span = '24h', limit = 5) =>
+		request<{ span: string; agents: { name: string; display_name: string; count: number }[] }>('GET', `/api/analytics/top-agents?span=${span}&limit=${limit}`),
+	topChannels: (span = '24h', limit = 5) =>
+		request<{ span: string; channels: { name: string; count: number }[] }>('GET', `/api/analytics/top-channels?span=${span}&limit=${limit}`),
+	summary: () =>
+		request<{ total_agents: number; total_channels: number; total_messages: number }>('GET', '/api/analytics/summary')
+};
+
+// Version
+export const version = {
+	get: () => request<{ version: string; repo: string }>('GET', '/api/version')
+};
+
+// Push notifications
+export const push = {
+	subscribe: (subscription: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+		request<{ id: number; message: string }>('POST', '/api/push/subscribe', subscription),
+	unsubscribe: (endpoint: string) =>
+		request<{ message: string }>('DELETE', '/api/push/subscribe', { endpoint }),
+	vapidKey: () => request<{ public_key: string }>('GET', '/api/push/vapid-key')
+};
+
+// User profile
+export const profile = {
+	update: (body: { display_name: string }) =>
+		request<{ message: string; user: { id: number; username: string; display_name: string; role: string } }>('PUT', '/api/auth/profile', body)
+};
+
 export { ApiError };

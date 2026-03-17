@@ -1,14 +1,27 @@
 <script lang="ts">
+	import { lookupAgent, lookupChannel, loadEntities, entitiesLoaded } from '$lib/stores/entities';
+	import { get } from 'svelte/store';
+
 	let { body, truncate }: { body: string; truncate?: number } = $props();
+
+	// Ensure entities are loaded for smart highlighting
+	let _entitiesInit = $state(false);
+	$effect(() => {
+		if (!_entitiesInit) {
+			_entitiesInit = true;
+			if (!get(entitiesLoaded)) loadEntities();
+		}
+	});
 
 	/**
 	 * Lightweight markdown renderer with @mentions, #channels, and URL auto-linking.
 	 * No external dependencies. Input is sanitized (HTML stripped) before processing.
+	 * Smart highlighting: validates @mentions and #channels against known entities.
 	 */
 
 	// Strip all HTML tags from raw input to prevent XSS
 	function stripHtml(text: string): string {
-		return text.replace(/<[^>]*>/g, '');
+		return text.replace(/<[^>]*>?/g, '');
 	}
 
 	// Escape HTML special characters in text content
@@ -64,16 +77,36 @@
 		// Italic: *text* (but not inside **)
 		s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
 
-		// @mentions
+		// @mentions — smart validation
 		s = s.replace(
-			/@([\w][\w.-]*)/g,
-			'<a href="/dm/$1" class="msg-mention">@$1</a>'
+			/(?<![.\w@])@([\w][\w.-]*)/g,
+			(_match, name) => {
+				const entity = lookupAgent(name);
+				if (entity && entity.exists && !entity.deleted) {
+					return `<a href="/dm/${name}" class="msg-mention">@${name}</a>`;
+				} else if (entity && entity.deleted) {
+					return `<span class="msg-mention msg-mention-inactive">@${name}<span class="msg-badge-inactive">inactive</span></span>`;
+				}
+				// Unknown — render as plain text
+				return `@${name}`;
+			}
 		);
 
-		// #channels
+		// #channels — smart validation
 		s = s.replace(
-			/#([\w][\w.-]*)/g,
-			'<a href="/channels/$1" class="msg-channel">$&</a>'
+			/(?<![.\w#])#([\w][\w.-]*)/g,
+			(_match, name) => {
+				// Skip pure numbers (e.g., "issue #42")
+				if (/^\d+$/.test(name)) return `#${name}`;
+				const entity = lookupChannel(name);
+				if (entity && entity.exists && !entity.deleted) {
+					return `<a href="/channels/${name}" class="msg-channel">#${name}</a>`;
+				} else if (entity && entity.deleted) {
+					return `<span class="msg-channel msg-channel-inactive">#${name}<span class="msg-badge-inactive">inactive</span></span>`;
+				}
+				// Unknown — render as plain text
+				return `#${name}`;
+			}
 		);
 
 		// Restore URL placeholders
@@ -268,5 +301,25 @@
 	.msg-body :global(.msg-h5),
 	.msg-body :global(.msg-h6) {
 		font-size: 1em;
+	}
+	.msg-body :global(.msg-mention-inactive) {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.msg-body :global(.msg-channel-inactive) {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.msg-body :global(.msg-badge-inactive) {
+		display: inline-block;
+		font-size: 0.7em;
+		font-weight: 700;
+		padding: 0 0.3em;
+		margin-left: 0.3em;
+		border-radius: 3px;
+		background-color: rgba(239, 68, 68, 0.2);
+		color: var(--accent-red);
+		vertical-align: middle;
+		line-height: 1.4;
 	}
 </style>

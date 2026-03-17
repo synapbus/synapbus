@@ -5,6 +5,8 @@
 	import { checkAuth, user, loading } from '$lib/stores/auth';
 	import { SSEClient } from '$lib/api/sse';
 	import { notifications } from '$lib/stores/notifications';
+	import { fontSize, applyFontSize } from '$lib/stores/fontSize';
+	import { version as versionApi } from '$lib/api/client';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Header from '$lib/components/Header.svelte';
 	import ThreadPanel from '$lib/components/ThreadPanel.svelte';
@@ -14,6 +16,8 @@
 	let sseUnsubscribe: (() => void) | null = $state(null);
 	let initialized = $state(false);
 	let sidebarOpen = $state(false);
+	let versionStr = $state('');
+	let repoUrl = $state('https://github.com/synapbus/synapbus');
 
 	let isLoginPage = $derived($page.url.pathname === '/login');
 
@@ -35,9 +39,25 @@
 		});
 	}
 
+	// Apply font size on mount
+	$effect(() => {
+		applyFontSize($fontSize);
+	});
+
 	$effect(() => {
 		if (!initialized) {
 			initialized = true;
+			// Load version
+			versionApi.get().then((v) => {
+				versionStr = v.version;
+				repoUrl = v.repo || repoUrl;
+			}).catch(() => { versionStr = 'dev'; });
+
+			// Register service worker
+			if ('serviceWorker' in navigator) {
+				navigator.serviceWorker.register('/sw.js').catch(() => {});
+			}
+
 			checkAuth().then((authenticated) => {
 				if (!authenticated && !isLoginPage) {
 					goto(`/login?return=${encodeURIComponent($page.url.pathname)}`);
@@ -86,6 +106,15 @@
 			<main class="flex-1 overflow-y-auto flex flex-col">
 				{@render children()}
 			</main>
+			<!-- Version Footer -->
+			{#if versionStr}
+				<footer class="px-5 py-2 border-t border-border flex items-center justify-between text-[10px] text-text-secondary flex-shrink-0">
+					<span>SynapBus</span>
+					<a href="{repoUrl}" target="_blank" rel="noopener" class="hover:text-text-primary transition-colors">
+						{versionStr}
+					</a>
+				</footer>
+			{/if}
 		</div>
 		<ThreadPanel />
 	</div>

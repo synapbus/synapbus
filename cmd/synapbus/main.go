@@ -44,6 +44,7 @@ import (
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/search/embedding"
 	"github.com/synapbus/synapbus/internal/storage"
+	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/web"
 	"github.com/synapbus/synapbus/internal/webhooks"
@@ -575,6 +576,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		r.Post("/auth/logout", authHandlers.HandleLogout)
 		r.Get("/auth/me", authHandlers.HandleMe)
 		r.Put("/auth/password", authHandlers.HandleChangePassword)
+		r.Put("/api/auth/profile", authHandlers.HandleUpdateProfile)
 	})
 
 	// MCP Streamable HTTP endpoint (requires agent auth: API key, managed key, or OAuth bearer)
@@ -599,6 +601,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// for messages sent via MCP (agents) as well as the REST API.
 	msgService.AddMessageListener(sseBroadcaster)
 
+	// Initialize push notification service
+	pushStore := push.NewSQLiteStore(db.DB)
+	pushService, err := push.NewService(pushStore, dataDir, logger)
+	if err != nil {
+		logger.Warn("push notification service unavailable", "error", err)
+	}
+
 	// Mount API routes (traces, export, stats, metrics, attachments, messages, agents, channels, SSE)
 	sessionMiddleware := api.SessionToOwnerMiddleware(userStore, sessionStore)
 	apiRouter := api.NewRouterWithConfig(api.RouterConfig{
@@ -613,6 +622,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		SSEHub:            sseHub,
 		Broadcaster:       sseBroadcaster,
 		SessionMiddleware: sessionMiddleware,
+		DB:                db.DB,
+		Version:           version,
+		PushService:       pushService,
 	})
 	r.Mount("/", apiRouter)
 

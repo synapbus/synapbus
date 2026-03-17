@@ -227,6 +227,59 @@ func (h *Handlers) HandleMe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(user)
 }
 
+// HandleUpdateProfile handles PUT /api/auth/profile.
+func (h *Handlers) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "PUT required")
+		return
+	}
+
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Not authenticated")
+		return
+	}
+
+	var req struct {
+		DisplayName string `json:"display_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		return
+	}
+
+	if strings.TrimSpace(req.DisplayName) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Display name cannot be empty")
+		return
+	}
+
+	if err := h.userStore.UpdateDisplayName(r.Context(), user.ID, req.DisplayName); err != nil {
+		h.logger.Error("update display name failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "server_error", "Failed to update display name")
+		return
+	}
+
+	// Fetch updated user
+	updated, err := h.userStore.GetUserByID(r.Context(), user.ID)
+	if err != nil {
+		h.logger.Error("fetch updated user failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "server_error", "Profile updated but failed to fetch result")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"message": "Profile updated",
+		"user": map[string]any{
+			"id":           updated.ID,
+			"username":     updated.Username,
+			"display_name": updated.DisplayName,
+			"role":         updated.Role,
+		},
+	})
+}
+
 // HandleChangePassword handles PUT /auth/password.
 func (h *Handlers) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
