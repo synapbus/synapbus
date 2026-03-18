@@ -55,6 +55,16 @@
 		return count > 99 ? '99+' : String(count);
 	}
 
+	// Filter DM list: only show human agents + AI agents with unread DMs.
+	// This hides agent-to-agent internal conversations from the sidebar.
+	let dmAgentList = $derived(
+		agentList.filter(agent => {
+			if (agent.type !== 'ai') return true;
+			const unread = $notifications.dms.get(agent.name) ?? 0;
+			return unread > 0;
+		})
+	);
+
 	const adminLinks = [
 		{ href: '/agents', label: 'Agents' },
 		{ href: '/settings', label: 'Settings' }
@@ -207,10 +217,10 @@
 			</button>
 			{#if dmsExpanded}
 				<div class="mt-0.5">
-					{#if agentList.length === 0}
+					{#if dmAgentList.length === 0}
 						<p class="px-3 py-1 text-xs text-text-secondary italic">No agents</p>
 					{:else}
-						{#each agentList as agent}
+						{#each dmAgentList as agent}
 							{@const dmUnread = $notifications.dms.get(agent.name) ?? 0}
 							<a
 								href="/dm/{agent.name}"

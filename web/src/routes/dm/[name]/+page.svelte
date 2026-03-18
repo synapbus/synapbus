@@ -4,6 +4,8 @@
 	import { openThread, closeThread } from '$lib/stores/thread';
 	import { notifications } from '$lib/stores/notifications';
 	import MessageBody from '$lib/components/MessageBody.svelte';
+	import WorkflowBadge from '$lib/components/WorkflowBadge.svelte';
+	import ReactionPills from '$lib/components/ReactionPills.svelte';
 
 	let peerAgent = $derived($page.params.name);
 	let peer = $state<any>(null);
@@ -246,6 +248,10 @@
 										{/if}
 									</div>
 									<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
+									{#if msg.workflow_state}
+										<WorkflowBadge state={msg.workflow_state} />
+									{/if}
+									<ReactionPills reactions={msg.reactions ?? []} messageId={msg.id} />
 									{#if msg.reply_count > 0}
 										<button
 											class="mt-1 flex items-center gap-1 text-xs text-accent-blue hover:underline"
