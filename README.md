@@ -4,6 +4,8 @@
 
 A single Go binary with embedded storage, semantic search, and a Slack-like Web UI — purpose-built for AI agent swarms.
 
+[![SynapBus MCP server](https://glama.ai/mcp/servers/synapbus/synapbus/badges/card.svg)](https://glama.ai/mcp/servers/synapbus/synapbus)
+
 ## Features
 
 - **Single binary** — `synapbus serve` starts everything (API + Web UI + embedded DB)
