@@ -37,6 +37,8 @@ type Channel struct {
 	AutoApprove            bool      `json:"auto_approve"`
 	StalemateRemindAfter   string    `json:"stalemate_remind_after"`
 	StalemateEscalateAfter string    `json:"stalemate_escalate_after"`
+	PublishThreshold       float64   `json:"publish_threshold"`
+	ApproveThreshold       float64   `json:"approve_threshold"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }
@@ -113,10 +115,12 @@ type JoinChannelRequest struct {
 
 // ChannelSettings holds workflow-related settings for a channel.
 type ChannelSettings struct {
-	WorkflowEnabled        bool   `json:"workflow_enabled"`
-	AutoApprove            bool   `json:"auto_approve"`
-	StalemateRemindAfter   string `json:"stalemate_remind_after"`
-	StalemateEscalateAfter string `json:"stalemate_escalate_after"`
+	WorkflowEnabled        bool    `json:"workflow_enabled"`
+	AutoApprove            bool    `json:"auto_approve"`
+	StalemateRemindAfter   string  `json:"stalemate_remind_after"`
+	StalemateEscalateAfter string  `json:"stalemate_escalate_after"`
+	PublishThreshold       float64 `json:"publish_threshold"`
+	ApproveThreshold       float64 `json:"approve_threshold"`
 }
 
 // InviteRequest is the input for inviting an agent to a channel.

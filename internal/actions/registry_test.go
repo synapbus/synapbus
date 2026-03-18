@@ -4,11 +4,11 @@ import (
 	"testing"
 )
 
-func TestRegistryHas27Actions(t *testing.T) {
+func TestRegistryHas28Actions(t *testing.T) {
 	r := NewRegistry()
 	got := len(r.List())
-	if got != 27 {
-		t.Errorf("expected 27 actions, got %d", got)
+	if got != 28 {
+		t.Errorf("expected 28 actions, got %d", got)
 	}
 }
 
@@ -24,6 +24,7 @@ func TestRegistryCategories(t *testing.T) {
 		{"swarm", 5},
 		{"attachments", 2},
 		{"reactions", 4},
+		{"trust", 1},
 	}
 
 	for _, tt := range tests {
@@ -52,6 +53,8 @@ func TestRegistryGetByName(t *testing.T) {
 		"upload_attachment", "download_attachment",
 		// reactions
 		"react", "unreact", "get_reactions", "list_by_state",
+		// trust
+		"get_trust",
 	}
 
 	for _, name := range allNames {

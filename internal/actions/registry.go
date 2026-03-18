@@ -6,10 +6,10 @@ type Registry struct {
 	ordered []Action // maintains insertion order
 }
 
-// NewRegistry creates a registry pre-populated with all 27 agent-callable actions.
+// NewRegistry creates a registry pre-populated with all 28 agent-callable actions.
 func NewRegistry() *Registry {
 	r := &Registry{
-		actions: make(map[string]Action, 27),
+		actions: make(map[string]Action, 28),
 	}
 	for _, a := range allActions() {
 		r.actions[a.Name] = a
@@ -42,7 +42,7 @@ func (r *Registry) ListByCategory(category string) []Action {
 	return out
 }
 
-// allActions returns the canonical list of all 27 agent-callable actions.
+// allActions returns the canonical list of all 28 agent-callable actions.
 func allActions() []Action {
 	return []Action{
 		// ── Messaging (7 actions) ──────────────────────────────────────
@@ -522,6 +522,27 @@ func allActions() []Action {
 				{
 					Description: "List approved messages in a channel",
 					Code:        `call("list_by_state", {"channel": "approvals", "state": "approved"})`,
+				},
+			},
+		},
+
+		// ── Trust (1 action) ────────────────────────────────────────
+		{
+			Name:        "get_trust",
+			Category:    "trust",
+			Description: "Get trust scores for an agent. Returns a map of action types to trust scores (0.0–1.0). Omit agent_name to get your own scores.",
+			Params: []Param{
+				{Name: "agent_name", Type: "string", Description: "Agent name to query (defaults to calling agent)"},
+			},
+			Returns: "JSON with agent_name and scores map (action_type -> score)",
+			Examples: []Example{
+				{
+					Description: "Get your own trust scores",
+					Code:        `call("get_trust", {})`,
+				},
+				{
+					Description: "Get another agent's trust scores",
+					Code:        `call("get_trust", {"agent_name": "research-mcpproxy"})`,
 				},
 			},
 		},

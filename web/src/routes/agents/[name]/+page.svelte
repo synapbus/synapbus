@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { agents as agentsApi } from '$lib/api/client';
+	import { agents as agentsApi, trust as trustApi } from '$lib/api/client';
 	import TraceViewer from '$lib/components/TraceViewer.svelte';
 
 	let agent = $state<any>(null);
@@ -17,6 +17,11 @@
 	let editNameValue = $state('');
 	let savingName = $state(false);
 	let nameError = $state('');
+
+	// Trust Scores state
+	let trustScores = $state<Record<string, number>>({});
+	let trustLoading = $state(false);
+	let trustEntries = $derived(Object.entries(trustScores).sort(([a], [b]) => a.localeCompare(b)));
 
 	// Access Rights state
 	let allowedChannels = $state('');
@@ -44,10 +49,24 @@
 			allowedChannels = (caps.allowed_channels || []).join(', ');
 			readOnly = caps.read_only ?? false;
 			maxRate = caps.max_rate ?? 60;
+			// Load trust scores
+			loadTrustScores();
 		} catch {
 			// handled
 		} finally {
 			loadingData = false;
+		}
+	}
+
+	async function loadTrustScores() {
+		trustLoading = true;
+		try {
+			const res = await trustApi.get(agentName);
+			trustScores = res.scores || {};
+		} catch {
+			trustScores = {};
+		} finally {
+			trustLoading = false;
 		}
 	}
 
@@ -283,6 +302,40 @@
 					</svg>
 					K8s Handlers
 				</a>
+			</div>
+		</div>
+
+		<!-- Trust Scores -->
+		<div class="card mb-5">
+			<div class="px-5 py-3 border-b border-border">
+				<h2 class="font-semibold text-sm text-text-primary font-display">Trust Scores</h2>
+			</div>
+			<div class="p-5">
+				{#if trustLoading}
+					<div class="space-y-3">
+						<div class="skeleton h-4 w-1/2"></div>
+						<div class="skeleton h-4 w-2/3"></div>
+					</div>
+				{:else if trustEntries.length === 0}
+					<p class="text-xs text-text-secondary">No trust scores recorded yet.</p>
+				{:else}
+					<div class="space-y-3">
+						{#each trustEntries as [actionType, score]}
+							<div>
+								<div class="flex items-center justify-between mb-1">
+									<span class="text-xs font-medium text-text-primary">{actionType}</span>
+									<span class="text-xs text-text-secondary">{Math.round(score * 100)}%</span>
+								</div>
+								<div class="w-full h-2 bg-bg-tertiary rounded-full overflow-hidden">
+									<div
+										class="h-full rounded-full transition-all duration-300 {score >= 0.7 ? 'bg-accent-green' : score >= 0.4 ? 'bg-accent-yellow' : 'bg-accent-red'}"
+										style="width: {Math.round(score * 100)}%"
+									></div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		</div>
 

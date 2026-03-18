@@ -51,6 +51,7 @@ func newTestHybridWithChannels(t *testing.T) (*HybridToolRegistrar, *channels.Se
 		nil, // attachmentService
 		nil, // searchService
 		nil, // reactionService
+		nil, // trustService
 		jsPool,
 		actionRegistry,
 		actionIndex,

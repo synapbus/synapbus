@@ -21,6 +21,7 @@ import (
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trust"
 )
 
 // MCPServer wraps the mcp-go server with SynapBus services.
@@ -42,6 +43,7 @@ func NewMCPServer(
 	attachmentService *attachments.Service,
 	searchService *search.Service,
 	reactionService *reactions.Service,
+	trustService *trust.Service,
 	consolePrinter *console.Printer,
 	jsPool *jsruntime.Pool,
 	actionRegistry *actions.Registry,
@@ -156,6 +158,7 @@ func NewMCPServer(
 		attachmentService,
 		searchService,
 		reactionService,
+		trustService,
 		jsPool,
 		actionRegistry,
 		actionIndex,

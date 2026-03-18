@@ -15,6 +15,7 @@ import (
 	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/webhooks"
 )
 
@@ -35,6 +36,7 @@ type RouterConfig struct {
 	K8sStore          k8s.K8sStore
 	ReactionService   *reactions.Service
 	PushService       *push.Service
+	TrustService      *trust.Service
 	SSEHub            *SSEHub
 	Broadcaster       *SSEBroadcaster
 	SessionMiddleware func(http.Handler) http.Handler
@@ -233,6 +235,16 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 				r.Delete("/api/push/subscribe", pushHandler.Unsubscribe)
 			})
 		}
+	}
+
+	// Trust Scores
+	if cfg.TrustService != nil {
+		trustHandler := NewTrustHandler(cfg.TrustService)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+
+			r.Get("/api/trust/{name}", trustHandler.GetScores)
+		})
 	}
 
 	// Analytics (authenticated, requires DB)
