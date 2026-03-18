@@ -327,6 +327,7 @@ func (h *ChannelsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
+		WorkflowEnabled        *bool   `json:"workflow_enabled"`
 		AutoApprove            *bool   `json:"auto_approve"`
 		StalemateRemindAfter   *string `json:"stalemate_remind_after"`
 		StalemateEscalateAfter *string `json:"stalemate_escalate_after"`
@@ -338,11 +339,15 @@ func (h *ChannelsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	settings := channels.ChannelSettings{
+		WorkflowEnabled:        ch.WorkflowEnabled,
 		AutoApprove:            ch.AutoApprove,
 		StalemateRemindAfter:   ch.StalemateRemindAfter,
 		StalemateEscalateAfter: ch.StalemateEscalateAfter,
 	}
 
+	if req.WorkflowEnabled != nil {
+		settings.WorkflowEnabled = *req.WorkflowEnabled
+	}
 	if req.AutoApprove != nil {
 		settings.AutoApprove = *req.AutoApprove
 	}
