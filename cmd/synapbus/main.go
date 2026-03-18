@@ -47,6 +47,7 @@ import (
 	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/trace"
+	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/web"
 	"github.com/synapbus/synapbus/internal/webhooks"
 )
@@ -291,6 +292,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	msgService.SetReactionEnricher(&reactionEnricherAdapter{svc: reactionService})
 	slog.Info("reaction service initialized")
 
+	// Create trust service
+	trustStore := trust.NewSQLiteStore(db.DB)
+	trustService := trust.NewService(trustStore, slog.Default())
+	slog.Info("trust service initialized")
+
 	// Initialize auth subsystem
 	authSecret := make([]byte, 32)
 	if _, err := rand.Read(authSecret); err != nil {
@@ -473,7 +479,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	actionIndex := actions.NewIndex(actionRegistry.List())
 
 	// Create MCP server (4 hybrid tools: my_status, send_message, search, execute)
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, con, jsPool, actionRegistry, actionIndex, db.DB)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, con, jsPool, actionRegistry, actionIndex, db.DB)
 	startTime := time.Now()
 
 	// Start task expiry worker
@@ -634,6 +640,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		DB:                db.DB,
 		Version:           version,
 		PushService:       pushService,
+		TrustService:      trustService,
 	})
 	r.Mount("/", apiRouter)
 
@@ -996,4 +1003,45 @@ func (a *channelLookupAdapter) GetChannelIDByName(ctx context.Context, name stri
 		return 0, err
 	}
 	return ch.ID, nil
+}
+
+// trustAdjusterAdapter adapts trust.Service to reactions.TrustAdjuster.
+type trustAdjusterAdapter struct {
+	svc *trust.Service
+}
+
+func (a *trustAdjusterAdapter) RecordApproval(ctx context.Context, agentName, actionType string) error {
+	_, err := a.svc.RecordApproval(ctx, agentName, actionType)
+	return err
+}
+
+func (a *trustAdjusterAdapter) RecordRejection(ctx context.Context, agentName, actionType string) error {
+	_, err := a.svc.RecordRejection(ctx, agentName, actionType)
+	return err
+}
+
+// agentTypeCheckerAdapter adapts agents.AgentService to reactions.AgentTypeChecker.
+type agentTypeCheckerAdapter struct {
+	agentService *agents.AgentService
+}
+
+func (a *agentTypeCheckerAdapter) GetAgentType(ctx context.Context, agentName string) (string, error) {
+	agent, err := a.agentService.GetAgent(ctx, agentName)
+	if err != nil {
+		return "", err
+	}
+	return agent.Type, nil
+}
+
+// messageAuthorResolverAdapter adapts messaging.MessagingService to reactions.MessageAuthorResolver.
+type messageAuthorResolverAdapter struct {
+	msgService *messaging.MessagingService
+}
+
+func (a *messageAuthorResolverAdapter) GetMessageAuthor(ctx context.Context, messageID int64) (string, error) {
+	msg, err := a.msgService.GetMessageByID(ctx, messageID)
+	if err != nil {
+		return "", err
+	}
+	return msg.FromAgent, nil
 }

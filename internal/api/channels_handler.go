@@ -327,10 +327,12 @@ func (h *ChannelsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		WorkflowEnabled        *bool   `json:"workflow_enabled"`
-		AutoApprove            *bool   `json:"auto_approve"`
-		StalemateRemindAfter   *string `json:"stalemate_remind_after"`
-		StalemateEscalateAfter *string `json:"stalemate_escalate_after"`
+		WorkflowEnabled        *bool    `json:"workflow_enabled"`
+		AutoApprove            *bool    `json:"auto_approve"`
+		StalemateRemindAfter   *string  `json:"stalemate_remind_after"`
+		StalemateEscalateAfter *string  `json:"stalemate_escalate_after"`
+		PublishThreshold       *float64 `json:"publish_threshold"`
+		ApproveThreshold       *float64 `json:"approve_threshold"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -343,6 +345,8 @@ func (h *ChannelsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 		AutoApprove:            ch.AutoApprove,
 		StalemateRemindAfter:   ch.StalemateRemindAfter,
 		StalemateEscalateAfter: ch.StalemateEscalateAfter,
+		PublishThreshold:       ch.PublishThreshold,
+		ApproveThreshold:       ch.ApproveThreshold,
 	}
 
 	if req.WorkflowEnabled != nil {
@@ -356,6 +360,12 @@ func (h *ChannelsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 	}
 	if req.StalemateEscalateAfter != nil {
 		settings.StalemateEscalateAfter = *req.StalemateEscalateAfter
+	}
+	if req.PublishThreshold != nil {
+		settings.PublishThreshold = *req.PublishThreshold
+	}
+	if req.ApproveThreshold != nil {
+		settings.ApproveThreshold = *req.ApproveThreshold
 	}
 
 	updated, err := h.channelService.UpdateChannelSettings(r.Context(), ch.ID, settings)

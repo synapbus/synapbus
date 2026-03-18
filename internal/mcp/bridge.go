@@ -16,6 +16,7 @@ import (
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
+	"github.com/synapbus/synapbus/internal/trust"
 )
 
 // ServiceBridge implements jsruntime.ToolCaller, mapping action names to
@@ -28,6 +29,7 @@ type ServiceBridge struct {
 	attachmentService *attachments.Service
 	searchService     *search.Service
 	reactionService   *reactions.Service
+	trustService      *trust.Service
 	agentName         string
 }
 
@@ -40,6 +42,7 @@ func NewServiceBridge(
 	attachmentService *attachments.Service,
 	searchService *search.Service,
 	reactionService *reactions.Service,
+	trustService *trust.Service,
 	agentName string,
 ) *ServiceBridge {
 	return &ServiceBridge{
@@ -50,6 +53,7 @@ func NewServiceBridge(
 		attachmentService: attachmentService,
 		searchService:     searchService,
 		reactionService:   reactionService,
+		trustService:      trustService,
 		agentName:         agentName,
 	}
 }
@@ -116,6 +120,10 @@ func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[st
 		return b.callGetReactions(ctx, args)
 	case "list_by_state":
 		return b.callListByState(ctx, args)
+
+	// --- Trust ---
+	case "get_trust":
+		return b.callGetTrust(ctx, args)
 
 	// --- DM send (also accessible via bridge for execute tool) ---
 	case "send_message":
@@ -1061,6 +1069,29 @@ func (b *ServiceBridge) callListByState(ctx context.Context, args map[string]any
 		"count":       len(messageIDs),
 		"channel":     channelName,
 		"state":       state,
+	}, nil
+}
+
+// --- Trust implementations ---
+
+func (b *ServiceBridge) callGetTrust(ctx context.Context, args map[string]any) (any, error) {
+	if b.trustService == nil {
+		return nil, fmt.Errorf("trust service not available")
+	}
+
+	agentName := getString(args, "agent_name", "")
+	if agentName == "" {
+		agentName = b.agentName
+	}
+
+	scores, err := b.trustService.GetScores(ctx, agentName)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"agent_name": agentName,
+		"scores":     scores,
 	}, nil
 }
 

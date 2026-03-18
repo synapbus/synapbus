@@ -263,4 +263,10 @@ export const reactions = {
 		)
 };
 
+// Trust Scores
+export const trust = {
+	get: (agentName: string) =>
+		request<{ scores: Record<string, number> }>('GET', `/api/trust/${encodeURIComponent(agentName)}`)
+};
+
 export { ApiError };

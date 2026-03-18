@@ -20,6 +20,7 @@ import (
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
+	"github.com/synapbus/synapbus/internal/trust"
 )
 
 // HybridToolRegistrar registers the 4 hybrid MCP tools.
@@ -31,6 +32,7 @@ type HybridToolRegistrar struct {
 	attachmentService *attachments.Service
 	searchService     *search.Service
 	reactionService   *reactions.Service
+	trustService      *trust.Service
 	jsPool            *jsruntime.Pool
 	actionRegistry    *actions.Registry
 	actionIndex       *actions.Index
@@ -47,6 +49,7 @@ func NewHybridToolRegistrar(
 	attachmentService *attachments.Service,
 	searchService *search.Service,
 	reactionService *reactions.Service,
+	trustService *trust.Service,
 	jsPool *jsruntime.Pool,
 	actionRegistry *actions.Registry,
 	actionIndex *actions.Index,
@@ -60,6 +63,7 @@ func NewHybridToolRegistrar(
 		attachmentService: attachmentService,
 		searchService:     searchService,
 		reactionService:   reactionService,
+		trustService:      trustService,
 		jsPool:            jsPool,
 		actionRegistry:    actionRegistry,
 		actionIndex:       actionIndex,
@@ -480,6 +484,7 @@ func (h *HybridToolRegistrar) handleExecute(ctx context.Context, req mcplib.Call
 		h.attachmentService,
 		h.searchService,
 		h.reactionService,
+		h.trustService,
 		agentName,
 	)
 
