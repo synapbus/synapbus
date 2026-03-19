@@ -113,7 +113,16 @@ export const channels = {
 	messages: (name: string, limit?: number) => {
 		const qs = limit ? `?limit=${limit}` : '';
 		return request<{ messages: any[]; total: number }>('GET', `/api/channels/${encodeURIComponent(name)}/messages${qs}`);
-	}
+	},
+	updateSettings: (name: string, settings: {
+		workflow_enabled?: boolean;
+		auto_approve?: boolean;
+		publish_threshold?: number;
+		approve_threshold?: number;
+		stalemate_remind_after?: string;
+		stalemate_escalate_after?: string;
+	}) =>
+		request<{ channel: any }>('PUT', `/api/channels/${encodeURIComponent(name)}/settings`, settings)
 };
 
 // Dead Letters

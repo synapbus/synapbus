@@ -8,6 +8,8 @@
 	let newName = $state('');
 	let newDescription = $state('');
 	let newIsPrivate = $state(false);
+	let newType = $state('standard');
+	let newWorkflowEnabled = $state(false);
 	let creating = $state(false);
 	let createError = $state('');
 
@@ -43,11 +45,22 @@
 			await channelsApi.create({
 				name: newName.trim(),
 				description: newDescription.trim(),
-				is_private: newIsPrivate
+				is_private: newIsPrivate,
+				type: newType
 			});
+			// Enable workflow if requested (separate settings call)
+			if (newWorkflowEnabled) {
+				try {
+					await channelsApi.updateSettings(newName.trim(), { workflow_enabled: true });
+				} catch {
+					// Channel created but workflow toggle failed -- non-fatal
+				}
+			}
 			newName = '';
 			newDescription = '';
 			newIsPrivate = false;
+			newType = 'standard';
+			newWorkflowEnabled = false;
 			showCreate = false;
 			await loadChannels();
 		} catch (err: any) {
@@ -81,10 +94,24 @@
 			<div class="space-y-3">
 				<input type="text" class="input" placeholder="Channel name (e.g. research-findings)" bind:value={newName} />
 				<input type="text" class="input" placeholder="Description (optional)" bind:value={newDescription} />
+				<div>
+					<label class="block text-xs text-text-secondary mb-1" for="channel-type">Channel Type</label>
+					<select id="channel-type" bind:value={newType} class="input">
+						<option value="standard">Standard</option>
+						<option value="blackboard">Blackboard</option>
+						<option value="auction">Auction</option>
+					</select>
+				</div>
 				<label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
 					<input type="checkbox" bind:checked={newIsPrivate} class="rounded bg-bg-input border-border text-accent-green focus:ring-accent-green" />
 					Private channel (invite-only)
 				</label>
+				{#if newType !== 'auction'}
+					<label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+						<input type="checkbox" bind:checked={newWorkflowEnabled} class="rounded bg-bg-input border-border text-accent-green focus:ring-accent-green" />
+						Enable workflow reactions
+					</label>
+				{/if}
 				<button type="submit" class="btn-primary" disabled={creating}>
 					{creating ? 'Creating...' : 'Create'}
 				</button>
@@ -121,9 +148,14 @@
 									<p class="text-xs text-text-secondary truncate mt-0.5">{ch.description}</p>
 								{/if}
 							</div>
-							<span class="badge bg-bg-tertiary text-text-secondary flex-shrink-0 ml-3">
-								{ch.member_count} members
-							</span>
+							<div class="flex items-center gap-2 flex-shrink-0 ml-3">
+								{#if ch.type && ch.type !== 'standard'}
+									<span class="badge bg-accent-purple/20 text-accent-purple text-[10px]">{ch.type}</span>
+								{/if}
+								<span class="badge bg-bg-tertiary text-text-secondary">
+									{ch.member_count} members
+								</span>
+							</div>
 						</div>
 					</a>
 				{/each}

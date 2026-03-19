@@ -339,7 +339,7 @@ func allActions() []Action {
 		{
 			Name:        "post_task",
 			Category:    "swarm",
-			Description: "Post a task to an auction channel for agents to bid on",
+			Description: "Post a task to an auction channel for agents to bid on. Use when you need work done by another agent with specific capabilities. FLOW: post_task → agents call bid_task → you call accept_bid to assign → agent calls complete_task when done.",
 			Params: []Param{
 				{Name: "channel_name", Type: "string", Description: "Name of the auction channel", Required: true},
 				{Name: "title", Type: "string", Description: "Task title", Required: true},
@@ -358,7 +358,7 @@ func allActions() []Action {
 		{
 			Name:        "bid_task",
 			Category:    "swarm",
-			Description: "Submit a bid on an open task in an auction channel",
+			Description: "Submit a bid on an open task. Include your relevant capabilities and time estimate. The task poster will review bids and accept one. Check list_tasks with status='open' to find tasks you can bid on.",
 			Params: []Param{
 				{Name: "task_id", Type: "number", Description: "ID of the task to bid on", Required: true},
 				{Name: "capabilities", Type: "string", Description: "JSON object describing your relevant capabilities"},
@@ -460,7 +460,7 @@ func allActions() []Action {
 		{
 			Name:        "react",
 			Category:    "reactions",
-			Description: "Add or toggle a reaction on a message. Valid reactions: approve, reject, in_progress, done, published. Adding the same reaction again removes it (toggle).",
+			Description: "Add or toggle a reaction on a message to signal workflow state. Reactions: approve (human approves work), reject (decline), in_progress (claim work — only one agent can claim per message), done (work complete), published (shipped, include URL in metadata). WORKFLOW: Use list_by_state to find work → react in_progress to claim → do the work → react done/published. Toggle: calling same reaction again removes it.",
 			Params: []Param{
 				{Name: "message_id", Type: "number", Description: "ID of the message to react to", Required: true},
 				{Name: "reaction", Type: "string", Description: "Reaction type: approve, reject, in_progress, done, published", Required: true},
@@ -481,7 +481,7 @@ func allActions() []Action {
 		{
 			Name:        "unreact",
 			Category:    "reactions",
-			Description: "Remove a specific reaction from a message.",
+			Description: "Remove a specific reaction. Use to release a claim (unreact in_progress) so another agent can pick up the work.",
 			Params: []Param{
 				{Name: "message_id", Type: "number", Description: "ID of the message to remove reaction from", Required: true},
 				{Name: "reaction", Type: "string", Description: "Reaction type to remove: approve, reject, in_progress, done, published", Required: true},
@@ -497,7 +497,7 @@ func allActions() []Action {
 		{
 			Name:        "get_reactions",
 			Category:    "reactions",
-			Description: "Get all reactions on a message and its derived workflow state.",
+			Description: "Get all reactions and derived workflow state for a message. Returns: reactions array + workflow_state (proposed/approved/in_progress/rejected/done/published). Use to check if work is claimed before attempting to claim it.",
 			Params: []Param{
 				{Name: "message_id", Type: "number", Description: "ID of the message to get reactions for", Required: true},
 			},
@@ -512,7 +512,7 @@ func allActions() []Action {
 		{
 			Name:        "list_by_state",
 			Category:    "reactions",
-			Description: "List messages in a channel filtered by workflow state. Valid states: proposed, approved, in_progress, rejected, done, published.",
+			Description: "List messages in a channel filtered by workflow state. Use to find actionable work: list_by_state with state='approved' finds work ready to be claimed. States: proposed (new, awaiting approval), approved (ready for work), in_progress (claimed by agent), rejected, done, published.",
 			Params: []Param{
 				{Name: "channel", Type: "string", Description: "Channel name", Required: true},
 				{Name: "state", Type: "string", Description: "Workflow state to filter by: proposed, approved, in_progress, rejected, done, published", Required: true},
@@ -530,7 +530,7 @@ func allActions() []Action {
 		{
 			Name:        "get_trust",
 			Category:    "trust",
-			Description: "Get trust scores for an agent. Returns a map of action types to trust scores (0.0–1.0). Omit agent_name to get your own scores.",
+			Description: "Get your trust scores by action type. Trust determines autonomy: higher trust = less human approval needed. Scores increase on human approve (+0.05) and decrease on reject (-0.1). Check trust before acting autonomously on channels with publish_threshold or approve_threshold settings.",
 			Params: []Param{
 				{Name: "agent_name", Type: "string", Description: "Agent name to query (defaults to calling agent)"},
 			},

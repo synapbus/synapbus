@@ -29,6 +29,10 @@
 	let uploading = $state(false);
 	let fileInputEl: HTMLInputElement;
 
+	// Workflow settings state
+	let settingsSaving = $state(false);
+	let settingsError = $state('');
+
 	function triggerFileInput() { fileInputEl?.click(); }
 
 	async function handleFileSelected(e: Event) {
@@ -216,6 +220,19 @@
 		if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
 		if (diff < 86400000) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 		return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	async function updateSetting(settings: Record<string, any>) {
+		settingsSaving = true;
+		settingsError = '';
+		try {
+			const res = await channelsApi.updateSettings(channelName, settings);
+			channel = res.channel;
+		} catch (err: any) {
+			settingsError = err.message || 'Failed to update settings';
+		} finally {
+			settingsSaving = false;
+		}
 	}
 
 	let isMember = $derived(
@@ -456,6 +473,98 @@
 						<div class="mb-3">
 							<p class="text-xs text-text-secondary mb-0.5">Type</p>
 							<span class="badge bg-accent-blue/20 text-accent-blue">{channel.type}</span>
+						</div>
+					{/if}
+
+					<!-- Workflow Settings -->
+					{#if channel && channel.type !== 'auction'}
+						<div class="border-t border-border pt-3 mt-3">
+							<h4 class="text-xs font-medium text-text-secondary mb-2">Workflow Settings</h4>
+							{#if settingsError}
+								<div class="mb-2 px-2 py-1.5 bg-accent-red/10 rounded text-[11px] text-accent-red">{settingsError}</div>
+							{/if}
+							<div class="space-y-2.5">
+								<label class="flex items-center justify-between text-xs cursor-pointer">
+									<span class="text-text-primary">Workflow enabled</span>
+									<input
+										type="checkbox"
+										checked={channel.workflow_enabled}
+										disabled={settingsSaving}
+										onchange={(e) => updateSetting({ workflow_enabled: (e.target as HTMLInputElement).checked })}
+										class="rounded bg-bg-input border-border text-accent-green focus:ring-accent-green"
+									/>
+								</label>
+								{#if channel.workflow_enabled}
+									<label class="flex items-center justify-between text-xs cursor-pointer">
+										<span class="text-text-primary">Auto-approve</span>
+										<input
+											type="checkbox"
+											checked={channel.auto_approve}
+											disabled={settingsSaving}
+											onchange={(e) => updateSetting({ auto_approve: (e.target as HTMLInputElement).checked })}
+											class="rounded bg-bg-input border-border text-accent-green focus:ring-accent-green"
+										/>
+									</label>
+									<div>
+										<label class="block text-xs text-text-primary mb-1" for="publish-threshold">
+											Publish threshold
+											<span class="text-text-secondary ml-1">{channel.publish_threshold ?? 0}</span>
+										</label>
+										<input
+											id="publish-threshold"
+											type="range"
+											min="0"
+											max="1"
+											step="0.05"
+											value={channel.publish_threshold ?? 0}
+											disabled={settingsSaving}
+											onchange={(e) => updateSetting({ publish_threshold: parseFloat((e.target as HTMLInputElement).value) })}
+											class="w-full h-1.5 bg-bg-tertiary rounded-lg appearance-none cursor-pointer accent-accent-green"
+										/>
+									</div>
+									<div>
+										<label class="block text-xs text-text-primary mb-1" for="approve-threshold">
+											Approve threshold
+											<span class="text-text-secondary ml-1">{channel.approve_threshold ?? 0}</span>
+										</label>
+										<input
+											id="approve-threshold"
+											type="range"
+											min="0"
+											max="1"
+											step="0.05"
+											value={channel.approve_threshold ?? 0}
+											disabled={settingsSaving}
+											onchange={(e) => updateSetting({ approve_threshold: parseFloat((e.target as HTMLInputElement).value) })}
+											class="w-full h-1.5 bg-bg-tertiary rounded-lg appearance-none cursor-pointer accent-accent-green"
+										/>
+									</div>
+									<div>
+										<label class="block text-xs text-text-primary mb-1" for="stalemate-remind">Stalemate remind after</label>
+										<input
+											id="stalemate-remind"
+											type="text"
+											value={channel.stalemate_remind_after || ''}
+											disabled={settingsSaving}
+											placeholder="e.g. 24h, 7d"
+											onchange={(e) => updateSetting({ stalemate_remind_after: (e.target as HTMLInputElement).value })}
+											class="input text-xs w-full"
+										/>
+									</div>
+									<div>
+										<label class="block text-xs text-text-primary mb-1" for="stalemate-escalate">Stalemate escalate after</label>
+										<input
+											id="stalemate-escalate"
+											type="text"
+											value={channel.stalemate_escalate_after || ''}
+											disabled={settingsSaving}
+											placeholder="e.g. 72h, 14d"
+											onchange={(e) => updateSetting({ stalemate_escalate_after: (e.target as HTMLInputElement).value })}
+											class="input text-xs w-full"
+										/>
+									</div>
+								{/if}
+							</div>
 						</div>
 					{/if}
 
