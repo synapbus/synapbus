@@ -287,8 +287,10 @@ export const onboarding = {
 		if (!res.ok) return '';
 		return res.text();
 	},
-	mcpConfig: (agentName: string) =>
-		request<{ config: any }>('GET', `/api/agents/${encodeURIComponent(agentName)}/mcp-config`),
+	mcpConfig: (agentName: string, apiKey?: string) => {
+		const qs = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '';
+		return request<any>('GET', `/api/agents/${encodeURIComponent(agentName)}/mcp-config${qs}`);
+	},
 	skills: () => request<{ skills: any[] }>('GET', '/api/skills'),
 	skill: async (name: string) => {
 		const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, { credentials: 'same-origin' });

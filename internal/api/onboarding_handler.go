@@ -38,44 +38,23 @@ func (h *OnboardingHandler) GetCLAUDEMD(w http.ResponseWriter, r *http.Request) 
 		archetype = "custom"
 	}
 
-	// Look up the agent to get display info
+	// Look up the agent to get owner info
 	ownerName := "owner"
+	displayName := agentName
 	agent, err := h.agentService.GetAgent(r.Context(), agentName)
 	if err != nil {
-		// Agent doesn't need to exist -- we generate for any name
 		h.logger.Debug("agent not found, using defaults", "name", agentName, "error", err)
 	} else {
 		if agent.DisplayName != "" {
-			agentName = agent.DisplayName
-		}
-	}
-
-	// Collect channel info
-	var channelInfos []onboarding.ChannelInfo
-	if h.channelService != nil {
-		// List all channels (use empty agent name to get all public channels)
-		chList, err := h.channelService.ListChannels(r.Context(), "")
-		if err != nil {
-			h.logger.Warn("failed to list channels", "error", err)
-		} else {
-			for _, ch := range chList {
-				if ch.IsSystem {
-					continue
-				}
-				channelInfos = append(channelInfos, onboarding.ChannelInfo{
-					Name:        ch.Name,
-					Description: ch.Description,
-				})
-			}
+			displayName = agent.DisplayName
 		}
 	}
 
 	config := onboarding.GeneratorConfig{
-		AgentName:   agentName,
+		AgentName:   displayName,
 		Archetype:   archetype,
 		OwnerName:   ownerName,
 		SynapBusURL: h.baseURL,
-		Channels:    channelInfos,
 	}
 
 	md, err := onboarding.GenerateCLAUDEMD(config)
@@ -89,8 +68,9 @@ func (h *OnboardingHandler) GetCLAUDEMD(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(md))
 }
 
-// GetMCPConfig handles GET /api/agents/{name}/mcp-config
+// GetMCPConfig handles GET /api/agents/{name}/mcp-config?api_key=xxx
 // Returns a JSON MCP config snippet for Claude Code settings.
+// If api_key query param is provided, uses it. Otherwise uses a placeholder.
 func (h *OnboardingHandler) GetMCPConfig(w http.ResponseWriter, r *http.Request) {
 	agentName := chi.URLParam(r, "name")
 
@@ -101,10 +81,12 @@ func (h *OnboardingHandler) GetMCPConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Use a placeholder for the API key since we cannot recover the raw key
-	apiKeyPlaceholder := "<YOUR_API_KEY>"
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		apiKey = "<YOUR_API_KEY>"
+	}
 
-	config := onboarding.GenerateMCPConfig(h.baseURL, apiKeyPlaceholder)
+	config := onboarding.GenerateMCPConfig(h.baseURL, apiKey)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

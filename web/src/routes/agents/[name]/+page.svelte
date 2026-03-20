@@ -185,7 +185,7 @@
 			mcpConfigLoading = true;
 			try {
 				const res = await onboarding.mcpConfig(agentName);
-				mcpConfigData = res.config;
+				mcpConfigData = res;
 			} catch {
 				mcpConfigData = null;
 			} finally {

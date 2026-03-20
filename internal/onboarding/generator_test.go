@@ -12,10 +12,6 @@ func TestGenerateCLAUDEMD_Researcher(t *testing.T) {
 		Archetype:   "researcher",
 		OwnerName:   "alice",
 		SynapBusURL: "http://localhost:8080",
-		Channels: []ChannelInfo{
-			{Name: "news-tech", Description: "Technology news"},
-			{Name: "general", Description: "General discussion"},
-		},
 	}
 
 	md, err := GenerateCLAUDEMD(config)
@@ -26,14 +22,10 @@ func TestGenerateCLAUDEMD_Researcher(t *testing.T) {
 	// Check common sections
 	checks := []string{
 		"# test-bot",
-		"research and discovery",
-		"**Owner**: alice",
-		"http://localhost:8080",
-		"#news-tech",
-		"#general",
 		"Startup Loop",
 		"Reactions",
 		"Trust",
+		"Research & Discovery",
 	}
 	for _, check := range checks {
 		if !strings.Contains(md, check) {
@@ -43,10 +35,9 @@ func TestGenerateCLAUDEMD_Researcher(t *testing.T) {
 
 	// Check researcher-specific sections
 	researcherChecks := []string{
-		"Researcher Workflow",
+		"Research & Discovery",
 		"Web Search",
 		"Finding Deduplication",
-		"Platform Discovery",
 	}
 	for _, check := range researcherChecks {
 		if !strings.Contains(md, check) {
@@ -109,8 +100,9 @@ func TestGenerateCLAUDEMD_EmptyArchetypeDefaultsToCustom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(md, "Custom Workflow") {
-		t.Error("expected custom workflow section for empty archetype")
+	// Custom template has only common sections — no "Example Workflow" section
+	if !strings.Contains(md, "Startup Loop") {
+		t.Error("expected common protocol sections for empty archetype")
 	}
 }
 

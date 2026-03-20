@@ -15,13 +15,6 @@ type GeneratorConfig struct {
 	OwnerName   string
 	SynapBusURL string
 	APIKey      string
-	Channels    []ChannelInfo
-}
-
-// ChannelInfo describes a channel for the template.
-type ChannelInfo struct {
-	Name        string
-	Description string
 }
 
 // ArchetypeInfo describes an available archetype.
@@ -57,7 +50,6 @@ type templateData struct {
 	ArchetypeDescription string
 	OwnerName            string
 	SynapBusURL          string
-	Channels             []ChannelInfo
 }
 
 // GenerateCLAUDEMD renders the CLAUDE.md template for the given archetype.
@@ -91,7 +83,6 @@ func GenerateCLAUDEMD(config GeneratorConfig) (string, error) {
 		ArchetypeDescription: description,
 		OwnerName:            config.OwnerName,
 		SynapBusURL:          config.SynapBusURL,
-		Channels:             config.Channels,
 	}
 
 	var buf bytes.Buffer
@@ -120,14 +111,15 @@ func GenerateMCPConfig(synapbusURL, apiKey string) string {
 	return string(b)
 }
 
-// ListArchetypes returns all available archetypes with their descriptions.
+// ListArchetypes returns available archetype examples with descriptions.
+// These are starting templates, not rigid categories.
 func ListArchetypes() []ArchetypeInfo {
 	return []ArchetypeInfo{
-		{Name: "researcher", Description: "Web search, platform discovery, finding deduplication, news channel posting"},
-		{Name: "writer", Description: "Content creation, blog publishing, editing, draft-review-publish pipeline"},
-		{Name: "commenter", Description: "Community engagement, comment drafting, tone guidelines, approval workflow"},
-		{Name: "monitor", Description: "Diff checking, alert thresholds, audit skills, change detection"},
-		{Name: "operator", Description: "Deployment, incident response, system commands, infrastructure tasks"},
-		{Name: "custom", Description: "Minimal template with common sections only -- user fills in the rest"},
+		{Name: "custom", Description: "Clean start — core SynapBus protocol only, you define the workflow"},
+		{Name: "researcher", Description: "Example: web search, platform discovery, finding deduplication"},
+		{Name: "writer", Description: "Example: content creation, blog publishing, draft-review-publish pipeline"},
+		{Name: "commenter", Description: "Example: community engagement, comment drafting, approval workflow"},
+		{Name: "monitor", Description: "Example: diff checking, change detection, alerts"},
+		{Name: "operator", Description: "Example: deployment, incident response, system automation"},
 	}
 }
