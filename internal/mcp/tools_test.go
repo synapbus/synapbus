@@ -391,4 +391,136 @@ func TestHybridTool_Execute(t *testing.T) {
 	})
 }
 
+func TestHybridTool_GetReplies(t *testing.T) {
+	h, msgSvc, agentSvc, _ := newTestHybridRegistrar(t)
+	ctx := context.Background()
+
+	agentSvc.Register(ctx, "alice", "Alice", "ai", nil, 1)
+	agentSvc.Register(ctx, "bob", "Bob", "ai", nil, 1)
+
+	authCtx := ContextWithAgentName(ctx, "alice")
+
+	// Send a parent message from bob to alice.
+	parentMsg, err := msgSvc.SendMessage(ctx, "bob", "alice", "parent message", messaging.SendOptions{})
+	if err != nil {
+		t.Fatalf("send parent message: %v", err)
+	}
+
+	// Send two replies to the parent message.
+	replyTo := parentMsg.ID
+	_, err = msgSvc.SendMessage(ctx, "alice", "bob", "reply one", messaging.SendOptions{ReplyTo: &replyTo})
+	if err != nil {
+		t.Fatalf("send reply 1: %v", err)
+	}
+	_, err = msgSvc.SendMessage(ctx, "bob", "alice", "reply two", messaging.SendOptions{ReplyTo: &replyTo})
+	if err != nil {
+		t.Fatalf("send reply 2: %v", err)
+	}
+
+	t.Run("returns replies for message", func(t *testing.T) {
+		req := makeRequest(map[string]any{
+			"message_id": float64(parentMsg.ID),
+		})
+
+		result, err := h.handleGetReplies(authCtx, req)
+		if err != nil {
+			t.Fatalf("handleGetReplies: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error: %v", result.Content)
+		}
+
+		var resp map[string]any
+		text := result.Content[0].(mcplib.TextContent).Text
+		json.Unmarshal([]byte(text), &resp)
+
+		count := resp["count"].(float64)
+		if count != 2 {
+			t.Errorf("expected 2 replies, got %v", count)
+		}
+
+		replies := resp["replies"].([]any)
+		if len(replies) != 2 {
+			t.Errorf("expected 2 replies in array, got %d", len(replies))
+		}
+
+		if resp["message_id"].(float64) != float64(parentMsg.ID) {
+			t.Errorf("expected message_id %d, got %v", parentMsg.ID, resp["message_id"])
+		}
+	})
+
+	t.Run("returns empty for message with no replies", func(t *testing.T) {
+		// Send a message with no replies.
+		noReplyMsg, err := msgSvc.SendMessage(ctx, "bob", "alice", "no replies here", messaging.SendOptions{})
+		if err != nil {
+			t.Fatalf("send message: %v", err)
+		}
+
+		req := makeRequest(map[string]any{
+			"message_id": float64(noReplyMsg.ID),
+		})
+
+		result, err := h.handleGetReplies(authCtx, req)
+		if err != nil {
+			t.Fatalf("handleGetReplies: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error: %v", result.Content)
+		}
+
+		var resp map[string]any
+		text := result.Content[0].(mcplib.TextContent).Text
+		json.Unmarshal([]byte(text), &resp)
+
+		count := resp["count"].(float64)
+		if count != 0 {
+			t.Errorf("expected 0 replies, got %v", count)
+		}
+	})
+
+	t.Run("missing message_id", func(t *testing.T) {
+		req := makeRequest(map[string]any{})
+		result, _ := h.handleGetReplies(authCtx, req)
+		if !result.IsError {
+			t.Error("expected error for missing message_id")
+		}
+	})
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		req := makeRequest(map[string]any{
+			"message_id": float64(1),
+		})
+		result, _ := h.handleGetReplies(ctx, req)
+		if !result.IsError {
+			t.Error("expected error for unauthenticated request")
+		}
+	})
+
+	t.Run("get_replies via execute", func(t *testing.T) {
+		req := makeRequest(map[string]any{
+			"code": fmt.Sprintf(`call("get_replies", {"message_id": %d})`, parentMsg.ID),
+		})
+
+		result, err := h.handleExecute(authCtx, req)
+		if err != nil {
+			t.Fatalf("handleExecute: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error: %v", result.Content)
+		}
+
+		// Parse the execute envelope to get the bridge result.
+		var resp map[string]any
+		text := result.Content[0].(mcplib.TextContent).Text
+		json.Unmarshal([]byte(text), &resp)
+
+		callEnvelope := resp["result"].(map[string]any)
+		inner := callEnvelope["result"].(map[string]any)
+		count := inner["count"].(float64)
+		if count != 2 {
+			t.Errorf("expected 2 replies via execute, got %v", count)
+		}
+	})
+}
+
 var _ = storage.RunMigrations

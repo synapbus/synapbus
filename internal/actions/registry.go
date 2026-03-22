@@ -516,12 +516,34 @@ func allActions() []Action {
 			Params: []Param{
 				{Name: "channel", Type: "string", Description: "Channel name", Required: true},
 				{Name: "state", Type: "string", Description: "Workflow state to filter by: proposed, approved, in_progress, rejected, done, published", Required: true},
+				{Name: "include_messages", Type: "boolean", Description: "If true, include full message bodies in the response (default: false)"},
 			},
-			Returns: "JSON with message_ids array and count",
+			Returns: "JSON with message_ids array, count, and optionally messages array with id, from_agent, body, priority, created_at, reply_to",
 			Examples: []Example{
 				{
 					Description: "List approved messages in a channel",
 					Code:        `call("list_by_state", {"channel": "approvals", "state": "approved"})`,
+				},
+				{
+					Description: "List approved messages with full content",
+					Code:        `call("list_by_state", {"channel": "approvals", "state": "approved", "include_messages": true})`,
+				},
+			},
+		},
+
+		// ── Threads (1 action) ──────────────────────────────────────
+		{
+			Name:        "get_replies",
+			Category:    "threads",
+			Description: "Get all replies (thread messages) for a given message. Use to read thread conversations, check for edits, or follow-up comments. Also available as a direct MCP tool.",
+			Params: []Param{
+				{Name: "message_id", Type: "number", Description: "ID of the parent message to get replies for", Required: true},
+			},
+			Returns: "JSON with message_id, replies array, and count",
+			Examples: []Example{
+				{
+					Description: "Get all replies to a message",
+					Code:        `call("get_replies", {"message_id": 42})`,
 				},
 			},
 		},

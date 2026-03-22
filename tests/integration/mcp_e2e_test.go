@@ -591,11 +591,11 @@ func TestE2E_ListTools(t *testing.T) {
 	aliceClient.Initialize()
 
 	tools := aliceClient.ListTools()
-	if len(tools) != 4 {
-		t.Fatalf("expected exactly 4 tools, got %d: %v", len(tools), tools)
+	if len(tools) != 5 {
+		t.Fatalf("expected exactly 5 tools, got %d: %v", len(tools), tools)
 	}
 
-	// Verify the 4 hybrid tools are present.
+	// Verify the 5 hybrid tools are present.
 	toolSet := make(map[string]bool)
 	for _, name := range tools {
 		toolSet[name] = true
@@ -605,6 +605,7 @@ func TestE2E_ListTools(t *testing.T) {
 		"send_message",
 		"search",
 		"execute",
+		"get_replies",
 	}
 	for _, name := range expectedTools {
 		if !toolSet[name] {

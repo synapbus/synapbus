@@ -72,14 +72,15 @@ func NewHybridToolRegistrar(
 	}
 }
 
-// RegisterAllOnServer registers all 4 hybrid tools on an mcp-go MCPServer.
+// RegisterAllOnServer registers all hybrid tools on an mcp-go MCPServer.
 func (h *HybridToolRegistrar) RegisterAllOnServer(s *server.MCPServer) {
 	s.AddTool(h.myStatusTool(), h.handleMyStatus)
 	s.AddTool(h.sendMessageTool(), h.handleSendMessage)
 	s.AddTool(h.searchTool(), h.handleSearch)
 	s.AddTool(h.executeTool(), h.handleExecute)
+	s.AddTool(h.getRepliesTool(), h.handleGetReplies)
 
-	h.logger.Info("hybrid MCP tools registered", "count", 4)
+	h.logger.Info("hybrid MCP tools registered", "count", 5)
 }
 
 // --- Tool Definitions ---
@@ -117,6 +118,13 @@ func (h *HybridToolRegistrar) executeTool() mcplib.Tool {
 		mcplib.WithDescription("Execute code that calls SynapBus actions. Use call(actionName, args) to invoke actions discovered via the 'search' tool. Multiple sequential calls are supported."),
 		mcplib.WithString("code", mcplib.Description("Code containing call() expressions. Example: call('read_inbox', { limit: 5 })"), mcplib.Required()),
 		mcplib.WithNumber("timeout", mcplib.Description("Execution timeout in milliseconds (default 120000, max 300000)")),
+	)
+}
+
+func (h *HybridToolRegistrar) getRepliesTool() mcplib.Tool {
+	return mcplib.NewTool("get_replies",
+		mcplib.WithDescription("Get all replies (thread messages) for a given message. Use this to read thread conversations, check for edits or follow-up comments on a message."),
+		mcplib.WithNumber("message_id", mcplib.Description("ID of the parent message to get replies for"), mcplib.Required()),
 	)
 }
 
@@ -499,6 +507,32 @@ func (h *HybridToolRegistrar) handleExecute(ctx context.Context, req mcplib.Call
 		"result":   result.Value,
 		"calls":    result.CallCount,
 		"duration": result.Duration.String(),
+	})
+}
+
+func (h *HybridToolRegistrar) handleGetReplies(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, ok := extractAgentName(ctx)
+	if !ok {
+		return mcplib.NewToolResultError("authentication required"), nil
+	}
+
+	messageID := req.GetInt("message_id", 0)
+	if messageID == 0 {
+		return mcplib.NewToolResultError("'message_id' parameter is required"), nil
+	}
+
+	replies, err := h.msgService.GetReplies(ctx, int64(messageID))
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("get_replies failed: %s", err)), nil
+	}
+
+	// Enrich replies with attachment info.
+	h.msgService.EnrichMessages(ctx, replies)
+
+	return resultJSON(map[string]any{
+		"message_id": messageID,
+		"replies":    replies,
+		"count":      len(replies),
 	})
 }
 

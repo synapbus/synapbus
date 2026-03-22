@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -9,6 +10,7 @@ import (
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/trace"
 )
@@ -293,6 +295,192 @@ func TestBridge_ParamHelpers(t *testing.T) {
 			t.Errorf("got %v, want true", v)
 		}
 	})
+}
+
+func newTestBridgeWithReactions(t *testing.T) (*ServiceBridge, *channels.Service) {
+	t.Helper()
+	db := newTestDB(t)
+
+	tracer := trace.NewTracer(db)
+	t.Cleanup(func() { tracer.Close() })
+
+	msgStore := messaging.NewSQLiteMessageStore(db)
+	msgService := messaging.NewMessagingService(msgStore, tracer)
+
+	agentStore := agents.NewSQLiteAgentStore(db)
+	agentService := agents.NewAgentService(agentStore, tracer)
+
+	channelStore := channels.NewSQLiteChannelStore(db)
+	channelService := channels.NewService(channelStore, msgService, tracer)
+
+	taskStore := channels.NewSQLiteTaskStore(db)
+	swarmService := channels.NewSwarmService(taskStore, channelStore, tracer)
+
+	reactionStore := reactions.NewSQLiteStore(db)
+	reactionService := reactions.NewService(reactionStore, slog.Default())
+
+	agentService.Register(context.Background(), "agent-a", "Agent A", "ai", nil, 1)
+	agentService.Register(context.Background(), "agent-b", "Agent B", "ai", nil, 1)
+
+	bridge := NewServiceBridge(
+		msgService,
+		agentService,
+		channelService,
+		swarmService,
+		nil, // attachmentService
+		nil, // searchService
+		reactionService,
+		nil, // trustService
+		"agent-a",
+	)
+	return bridge, channelService
+}
+
+func TestBridge_React_WorkflowState(t *testing.T) {
+	tests := []struct {
+		name              string
+		reaction          string
+		wantAction        string
+		wantWorkflowState string
+	}{
+		{
+			name:              "approve sets approved state",
+			reaction:          "approve",
+			wantAction:        "added",
+			wantWorkflowState: "approved",
+		},
+		{
+			name:              "in_progress sets in_progress state",
+			reaction:          "in_progress",
+			wantAction:        "added",
+			wantWorkflowState: "in_progress",
+		},
+		{
+			name:              "done sets done state",
+			reaction:          "done",
+			wantAction:        "added",
+			wantWorkflowState: "done",
+		},
+		{
+			name:              "published sets published state",
+			reaction:          "published",
+			wantAction:        "added",
+			wantWorkflowState: "published",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bridge, channelService := newTestBridgeWithReactions(t)
+			ctx := context.Background()
+
+			// Create a channel and send a message to react to
+			ch, err := channelService.CreateChannel(ctx, channels.CreateChannelRequest{
+				Name: "react-test", Type: "standard", CreatedBy: "agent-a",
+			})
+			if err != nil {
+				t.Fatalf("create channel: %v", err)
+			}
+			channelService.JoinChannel(ctx, ch.ID, "agent-a")
+
+			msg, err := bridge.Call(ctx, "send_channel_message", map[string]any{
+				"channel_name": "react-test",
+				"body":         "test message",
+			})
+			if err != nil {
+				t.Fatalf("send_channel_message: %v", err)
+			}
+			msgMap := msg.(map[string]any)
+			msgID := msgMap["message_id"]
+
+			// React to the message
+			result, err := bridge.Call(ctx, "react", map[string]any{
+				"message_id": msgID,
+				"reaction":   tt.reaction,
+			})
+			if err != nil {
+				t.Fatalf("react: %v", err)
+			}
+
+			resp := result.(map[string]any)
+
+			if resp["action"] != tt.wantAction {
+				t.Errorf("action = %v, want %v", resp["action"], tt.wantAction)
+			}
+
+			state, ok := resp["workflow_state"]
+			if !ok {
+				t.Fatal("response missing workflow_state field")
+			}
+			if state != tt.wantWorkflowState {
+				t.Errorf("workflow_state = %v, want %v", state, tt.wantWorkflowState)
+			}
+
+			rxns, ok := resp["reactions"]
+			if !ok {
+				t.Fatal("response missing reactions field")
+			}
+			rxnSlice, ok := rxns.([]*reactions.Reaction)
+			if !ok {
+				t.Fatalf("reactions has unexpected type %T", rxns)
+			}
+			if len(rxnSlice) == 0 {
+				t.Error("expected at least one reaction")
+			}
+		})
+	}
+}
+
+func TestBridge_React_Toggle_Removes_WorkflowState(t *testing.T) {
+	bridge, channelService := newTestBridgeWithReactions(t)
+	ctx := context.Background()
+
+	ch, err := channelService.CreateChannel(ctx, channels.CreateChannelRequest{
+		Name: "toggle-test", Type: "standard", CreatedBy: "agent-a",
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	channelService.JoinChannel(ctx, ch.ID, "agent-a")
+
+	msg, err := bridge.Call(ctx, "send_channel_message", map[string]any{
+		"channel_name": "toggle-test",
+		"body":         "toggle message",
+	})
+	if err != nil {
+		t.Fatalf("send_channel_message: %v", err)
+	}
+	msgMap := msg.(map[string]any)
+	msgID := msgMap["message_id"]
+
+	// Add reaction
+	bridge.Call(ctx, "react", map[string]any{
+		"message_id": msgID,
+		"reaction":   "approve",
+	})
+
+	// Toggle off (remove)
+	result, err := bridge.Call(ctx, "react", map[string]any{
+		"message_id": msgID,
+		"reaction":   "approve",
+	})
+	if err != nil {
+		t.Fatalf("react toggle off: %v", err)
+	}
+
+	resp := result.(map[string]any)
+	if resp["action"] != "removed" {
+		t.Errorf("action = %v, want removed", resp["action"])
+	}
+
+	// After removing the only reaction, workflow_state should be "proposed"
+	state, ok := resp["workflow_state"]
+	if !ok {
+		t.Fatal("response missing workflow_state after removal")
+	}
+	if state != "proposed" {
+		t.Errorf("workflow_state = %v, want proposed", state)
+	}
 }
 
 var _ = storage.RunMigrations

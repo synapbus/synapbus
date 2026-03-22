@@ -270,6 +270,33 @@ func (s *Service) GetReactionsByMessageIDs(ctx context.Context, messageIDs []int
 }
 
 // ListByState returns message IDs in a channel that have the given workflow state.
+// For non-proposed states, it verifies each candidate by computing the actual
+// workflow state from all reactions, so a message with both "approve" and "reject"
+// only appears in the state matching its highest-priority reaction.
 func (s *Service) ListByState(ctx context.Context, channelID int64, state string) ([]int64, error) {
-	return s.store.GetMessageIDsByState(ctx, channelID, state)
+	candidates, err := s.store.GetMessageIDsByState(ctx, channelID, state)
+	if err != nil {
+		return nil, err
+	}
+
+	// "proposed" means no reactions at all — the SQL query already handles this correctly.
+	if state == StateProposed {
+		return candidates, nil
+	}
+
+	// Batch-fetch reactions for all candidate messages.
+	reactionsMap, err := s.store.GetByMessageIDs(ctx, candidates)
+	if err != nil {
+		return nil, fmt.Errorf("batch fetch reactions for state filtering: %w", err)
+	}
+
+	// Only keep messages whose computed workflow state matches the requested state.
+	var filtered []int64
+	for _, id := range candidates {
+		rxns := reactionsMap[id]
+		if ComputeWorkflowState(rxns) == state {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered, nil
 }

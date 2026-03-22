@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -120,6 +121,10 @@ func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[st
 		return b.callGetReactions(ctx, args)
 	case "list_by_state":
 		return b.callListByState(ctx, args)
+
+	// --- Threads ---
+	case "get_replies":
+		return b.callGetReplies(ctx, args)
 
 	// --- Trust ---
 	case "get_trust":
@@ -981,6 +986,17 @@ func (b *ServiceBridge) callReact(ctx context.Context, args map[string]any) (any
 		resp["id"] = result.Reaction.ID
 		resp["created_at"] = result.Reaction.CreatedAt
 	}
+
+	// After the toggle, get current reactions and workflow state
+	rxns, state, err := b.reactionService.GetReactions(ctx, int64(messageID))
+	if err != nil {
+		// Non-fatal: still return the toggle result
+		slog.Warn("failed to get reactions after toggle", "error", err)
+	} else {
+		resp["workflow_state"] = state
+		resp["reactions"] = rxns
+	}
+
 	return resp, nil
 }
 
@@ -1064,11 +1080,56 @@ func (b *ServiceBridge) callListByState(ctx context.Context, args map[string]any
 		messageIDs = []int64{}
 	}
 
-	return map[string]any{
+	resp := map[string]any{
 		"message_ids": messageIDs,
 		"count":       len(messageIDs),
 		"channel":     channelName,
 		"state":       state,
+	}
+
+	includeMessages := getBool(args, "include_messages", false)
+	if includeMessages && len(messageIDs) > 0 && b.msgService != nil {
+		var messages []map[string]any
+		for _, id := range messageIDs {
+			msg, err := b.msgService.GetMessageByID(ctx, id)
+			if err != nil {
+				continue // skip messages that can't be fetched
+			}
+			messages = append(messages, map[string]any{
+				"id":         msg.ID,
+				"from_agent": msg.FromAgent,
+				"body":       msg.Body,
+				"priority":   msg.Priority,
+				"created_at": msg.CreatedAt,
+				"reply_to":   msg.ReplyTo,
+			})
+		}
+		resp["messages"] = messages
+	}
+
+	return resp, nil
+}
+
+// --- Threads ---
+
+func (b *ServiceBridge) callGetReplies(ctx context.Context, args map[string]any) (any, error) {
+	messageID := getInt(args, "message_id", 0)
+	if messageID == 0 {
+		return nil, fmt.Errorf("'message_id' parameter is required")
+	}
+
+	replies, err := b.msgService.GetReplies(ctx, int64(messageID))
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich with attachments
+	b.msgService.EnrichMessages(ctx, replies)
+
+	return map[string]any{
+		"message_id": messageID,
+		"replies":    replies,
+		"count":      len(replies),
 	}, nil
 }
 
