@@ -60,11 +60,6 @@ func (s *Service) Upload(ctx context.Context, req UploadRequest) (*UploadResult,
 		mimeType = DetectMIMEType(sniffBuf, req.Filename)
 	}
 
-	// Validate file type against allowlist.
-	if !IsAllowedType(mimeType) {
-		return nil, ErrUnsupportedType
-	}
-
 	// Assign default filename if missing.
 	filename := req.Filename
 	if filename == "" {

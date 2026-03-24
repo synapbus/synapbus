@@ -19,8 +19,6 @@
 	let uploadError = $state('');
 	let fileInputEl: HTMLInputElement | undefined = $state(undefined);
 
-	const ACCEPTED_FILES = '.jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log';
-
 	function formatFileSize(bytes: number): string {
 		if (bytes < 1024 * 1024) {
 			return (bytes / 1024).toFixed(1) + ' KB';
@@ -261,7 +259,6 @@
 	<input
 		bind:this={fileInputEl}
 		type="file"
-		accept={ACCEPTED_FILES}
 		class="hidden"
 		onchange={handleFileSelected}
 	/>

@@ -216,6 +216,8 @@ func (b *ServiceBridge) callReadInbox(ctx context.Context, args map[string]any) 
 		return nil, err
 	}
 
+	b.msgService.EnrichMessages(ctx, page.Messages)
+
 	return map[string]any{
 		"messages": page.Messages,
 		"count":    len(page.Messages),
@@ -232,6 +234,8 @@ func (b *ServiceBridge) callClaimMessages(ctx context.Context, args map[string]a
 	if err != nil {
 		return nil, err
 	}
+
+	b.msgService.EnrichMessages(ctx, messages)
 
 	return map[string]any{
 		"messages": messages,
@@ -287,6 +291,15 @@ func (b *ServiceBridge) callSearchMessages(ctx context.Context, args map[string]
 			return nil, err
 		}
 
+		// Enrich messages with attachments
+		searchMsgs := make([]*messaging.Message, 0, len(resp.Results))
+		for _, r := range resp.Results {
+			if r.Message != nil {
+				searchMsgs = append(searchMsgs, r.Message)
+			}
+		}
+		b.msgService.EnrichMessages(ctx, searchMsgs)
+
 		resultMsgs := make([]map[string]any, len(resp.Results))
 		for i, r := range resp.Results {
 			entry := map[string]any{
@@ -325,6 +338,8 @@ func (b *ServiceBridge) callSearchMessages(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
+
+	b.msgService.EnrichMessages(ctx, page.Messages)
 
 	return map[string]any{
 		"messages":    page.Messages,
@@ -553,15 +568,18 @@ func (b *ServiceBridge) callGetChannelMessages(ctx context.Context, args map[str
 		return nil, err
 	}
 
+	b.msgService.EnrichMessages(ctx, page.Messages)
+
 	result := make([]map[string]any, len(page.Messages))
 	for i, msg := range page.Messages {
 		result[i] = map[string]any{
-			"id":         msg.ID,
-			"from":       msg.FromAgent,
-			"body":       msg.Body,
-			"priority":   msg.Priority,
-			"status":     msg.Status,
-			"created_at": msg.CreatedAt,
+			"id":          msg.ID,
+			"from":        msg.FromAgent,
+			"body":        msg.Body,
+			"priority":    msg.Priority,
+			"status":      msg.Status,
+			"created_at":  msg.CreatedAt,
+			"attachments": msg.Attachments,
 		}
 		if len(msg.Metadata) > 0 {
 			result[i]["metadata"] = msg.Metadata
@@ -1119,23 +1137,30 @@ func (b *ServiceBridge) callListByState(ctx context.Context, args map[string]any
 		if maxBodyLen <= 0 {
 			maxBodyLen = 500
 		}
-		var messages []map[string]any
+		var msgSlice []*messaging.Message
 		for _, id := range pageIDs {
 			msg, err := b.msgService.GetMessageByID(ctx, id)
 			if err != nil {
 				continue
 			}
+			msgSlice = append(msgSlice, msg)
+		}
+		b.msgService.EnrichMessages(ctx, msgSlice)
+
+		var messages []map[string]any
+		for _, msg := range msgSlice {
 			body := msg.Body
 			if len(body) > maxBodyLen {
 				body = body[:maxBodyLen] + "..."
 			}
 			messages = append(messages, map[string]any{
-				"id":         msg.ID,
-				"from_agent": msg.FromAgent,
-				"body":       body,
-				"priority":   msg.Priority,
-				"created_at": msg.CreatedAt,
-				"reply_to":   msg.ReplyTo,
+				"id":          msg.ID,
+				"from_agent":  msg.FromAgent,
+				"body":        body,
+				"priority":    msg.Priority,
+				"created_at":  msg.CreatedAt,
+				"reply_to":    msg.ReplyTo,
+				"attachments": msg.Attachments,
 			})
 		}
 		resp["messages"] = messages

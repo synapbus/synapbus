@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { agents as agentsApi, messages as messagesApi } from '$lib/api/client';
+	import { agents as agentsApi, messages as messagesApi, attachments as attachmentsApi } from '$lib/api/client';
 	import { openThread, closeThread } from '$lib/stores/thread';
 	import { notifications } from '$lib/stores/notifications';
 	import MessageBody from '$lib/components/MessageBody.svelte';
+	import AttachmentPreview from '$lib/components/AttachmentPreview.svelte';
 	import WorkflowBadge from '$lib/components/WorkflowBadge.svelte';
 	import ReactionPills from '$lib/components/ReactionPills.svelte';
 
@@ -18,6 +19,13 @@
 	let body = $state('');
 	let sending = $state(false);
 	let sendError = $state('');
+
+	// Attachment state
+	type UploadedAttachment = { hash: string; original_filename: string; size: number; mime_type: string };
+	let uploadedAttachments = $state<UploadedAttachment[]>([]);
+	let uploading = $state(false);
+	let uploadError = $state('');
+	let fileInputEl: HTMLInputElement | undefined = $state(undefined);
 
 	// Mark-as-read timer
 	let markReadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -96,15 +104,18 @@
 	});
 
 	async function handleSend() {
-		if (!body.trim()) return;
+		if (!body.trim() && uploadedAttachments.length === 0) return;
 		sending = true;
 		sendError = '';
 		try {
 			await messagesApi.send({
 				to: peerAgent,
-				body: body.trim()
+				body: body.trim(),
+				attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.hash) : undefined
 			});
 			body = '';
+			uploadedAttachments = [];
+			uploadError = '';
 			await loadMessages();
 		} catch (err: any) {
 			sendError = err.message || 'Failed to send message';
@@ -146,6 +157,32 @@
 		if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
 		if (diff < 86400000) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 		return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+		return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+	}
+
+	async function handleFileSelected(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		uploading = true;
+		uploadError = '';
+		try {
+			const result = await attachmentsApi.upload(file);
+			uploadedAttachments = [...uploadedAttachments, result];
+		} catch (err: any) {
+			uploadError = err.message || 'Upload failed';
+		} finally {
+			uploading = false;
+			if (fileInputEl) fileInputEl.value = '';
+		}
+	}
+
+	function removeAttachment(hash: string) {
+		uploadedAttachments = uploadedAttachments.filter(a => a.hash !== hash);
 	}
 
 	let isOwnAgent = $derived(ownAgents.some(a => a.name === peerAgent));
@@ -248,6 +285,13 @@
 										{/if}
 									</div>
 									<div class="text-sm text-text-primary/90 leading-relaxed"><MessageBody body={msg.body} /></div>
+									{#if msg.attachments?.length > 0}
+										<div class="flex flex-wrap gap-2 mt-1.5">
+											{#each msg.attachments as att (att.hash)}
+												<AttachmentPreview attachment={att} />
+											{/each}
+										</div>
+									{/if}
 									{#if msg.workflow_state}
 										<WorkflowBadge state={msg.workflow_state} />
 									{/if}
@@ -286,11 +330,34 @@
 			{#if sendError}
 				<div class="mb-2 px-3 py-1.5 bg-accent-red/10 rounded text-xs text-accent-red">{sendError}</div>
 			{/if}
+			{#if uploadError}
+				<div class="mb-2 px-3 py-1.5 bg-accent-red/10 rounded text-xs text-accent-red">{uploadError}</div>
+			{/if}
 			{#if ownAgents.length === 0}
 				<div class="px-3 py-2 bg-bg-tertiary rounded text-xs text-text-secondary text-center">
 					Register an agent to send messages
 				</div>
 			{:else}
+				<!-- Hidden file input -->
+				<input bind:this={fileInputEl} type="file" class="hidden" onchange={handleFileSelected} />
+				{#if uploadedAttachments.length > 0}
+					<div class="flex flex-wrap gap-1.5 px-3 pt-2">
+						{#each uploadedAttachments as att (att.hash)}
+							<span class="inline-flex items-center gap-1 px-2 py-1 bg-bg-secondary border border-border rounded text-xs text-text-primary">
+								<svg class="w-3 h-3 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" /></svg>
+								{att.original_filename}
+								<span class="text-text-secondary">({formatFileSize(att.size)})</span>
+								<button class="ml-0.5 text-text-secondary hover:text-accent-red" onclick={() => removeAttachment(att.hash)} title="Remove">&times;</button>
+							</span>
+						{/each}
+					</div>
+				{/if}
+				{#if uploading}
+					<div class="flex items-center gap-2 px-3 pt-1 text-xs text-text-secondary">
+						<svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+						Uploading...
+					</div>
+				{/if}
 				<div class="flex items-end gap-2 bg-bg-tertiary rounded-lg border border-border focus-within:border-border-active transition-colors">
 					<textarea
 						placeholder="Message {peer?.display_name || peerAgent}..."
@@ -300,8 +367,18 @@
 						onkeydown={handleKeydown}
 					></textarea>
 					<button
+						class="p-2 mr-0.5 mb-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors disabled:opacity-40"
+						disabled={uploading}
+						onclick={() => fileInputEl?.click()}
+						title="Attach file"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+						</svg>
+					</button>
+					<button
 						class="p-2 mr-1 mb-1 rounded-md bg-accent-green text-white hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-						disabled={sending || !body.trim()}
+						disabled={sending || (!body.trim() && uploadedAttachments.length === 0)}
 						onclick={handleSend}
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

@@ -382,7 +382,6 @@
 							<input
 								type="file"
 								class="hidden"
-								accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log"
 								bind:this={fileInputEl}
 								onchange={handleFileSelected}
 							/>

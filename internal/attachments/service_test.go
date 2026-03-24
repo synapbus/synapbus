@@ -236,18 +236,18 @@ func TestService_Upload_FileTypeValidation(t *testing.T) {
 			wantErr:  nil,
 		},
 		{
-			name:     "invalid type zip rejected",
+			name:     "zip upload allowed",
 			content:  []byte("not real zip content"),
 			filename: "archive.zip",
 			mimeType: "application/zip",
-			wantErr:  ErrUnsupportedType,
+			wantErr:  nil,
 		},
 		{
-			name:     "invalid type executable rejected",
+			name:     "executable upload allowed",
 			content:  []byte{0x7f, 0x45, 0x4c, 0x46},
 			filename: "program.exe",
 			mimeType: "application/x-executable",
-			wantErr:  ErrUnsupportedType,
+			wantErr:  nil,
 		},
 	}
 

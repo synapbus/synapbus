@@ -167,10 +167,10 @@ func TestIsAllowedType(t *testing.T) {
 		{"text/csv", true},
 		{"text/plain; charset=utf-8", true},
 		{"application/json", true},
-		{"application/octet-stream", false},
-		{"application/zip", false},
-		{"application/x-executable", false},
-		{"video/mp4", false},
+		{"application/octet-stream", true},
+		{"application/zip", true},
+		{"application/x-executable", true},
+		{"video/mp4", true},
 	}
 
 	for _, tt := range tests {

@@ -119,26 +119,8 @@ func IsImageType(mimeType string) bool {
 	return imageTypes[mimeType]
 }
 
-// IsAllowedType returns true if the MIME type is allowed for upload.
-// Allowed: image/*, application/pdf, text/*.
+// IsAllowedType returns true for all MIME types. Any file type is allowed;
+// only size is restricted (50 MB max).
 func IsAllowedType(mimeType string) bool {
-	// Normalize: strip parameters like "; charset=utf-8".
-	base := mimeType
-	if idx := strings.Index(mimeType, ";"); idx >= 0 {
-		base = strings.TrimSpace(mimeType[:idx])
-	}
-	if strings.HasPrefix(base, "image/") {
-		return true
-	}
-	if base == "application/pdf" {
-		return true
-	}
-	if strings.HasPrefix(base, "text/") {
-		return true
-	}
-	// Also allow JSON and XML which may be detected as application/*
-	if base == "application/json" || base == "application/xml" {
-		return true
-	}
-	return false
+	return true
 }
