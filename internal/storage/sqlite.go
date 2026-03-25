@@ -39,9 +39,18 @@ func New(ctx context.Context, dataDir string) (*DB, error) {
 	// Configure SQLite pragmas
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
+		"PRAGMA busy_timeout=15000",
 		"PRAGMA foreign_keys=ON",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA wal_autocheckpoint=1000",
 	}
+
+	// Limit connection pool to reduce write contention.
+	// SQLite allows one writer at a time; multiple connections competing
+	// for the write lock cause SQLITE_BUSY errors. Keeping MaxOpenConns
+	// low reduces lock contention while still allowing concurrent reads.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
 
 	for _, pragma := range pragmas {
 		if _, err := db.ExecContext(ctx, pragma); err != nil {

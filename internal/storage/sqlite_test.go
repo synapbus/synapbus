@@ -68,8 +68,8 @@ func TestNew(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to query busy_timeout: %v", err)
 			}
-			if timeout != 5000 {
-				t.Errorf("busy_timeout = %d, want 5000", timeout)
+			if timeout != 15000 {
+				t.Errorf("busy_timeout = %d, want 15000", timeout)
 			}
 
 			// Verify database is usable
