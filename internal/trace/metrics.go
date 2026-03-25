@@ -6,6 +6,9 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/expfmt"
 )
 
 // Metrics provides Prometheus-compatible metrics for SynapBus.
@@ -93,6 +96,17 @@ func (m *Metrics) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# HELP synapbus_active_agents Number of currently active agents.\n")
 	fmt.Fprintf(w, "# TYPE synapbus_active_agents gauge\n")
 	fmt.Fprintf(w, "synapbus_active_agents %d\n", m.activeAgents.Load())
+	fmt.Fprintf(w, "\n")
+
+	// Append metrics from the standard Prometheus registry (reactor metrics, etc.)
+	mfs, _ := prometheus.DefaultGatherer.Gather()
+	enc := expfmt.NewEncoder(w, expfmt.NewFormat(expfmt.TypeTextPlain))
+	for _, mf := range mfs {
+		// Only include our custom metrics, skip Go runtime metrics
+		if name := mf.GetName(); len(name) > 8 && name[:8] == "synapbus" {
+			_ = enc.Encode(mf)
+		}
+	}
 }
 
 // NullMetrics is a no-op metrics implementation for when metrics are disabled.

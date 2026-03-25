@@ -10,6 +10,7 @@ import (
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/dispatcher"
 	k8spkg "github.com/synapbus/synapbus/internal/k8s"
+	"github.com/synapbus/synapbus/internal/metrics"
 
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -134,7 +135,17 @@ func (p *Poller) checkJob(ctx context.Context, run *ReactiveRun) {
 func (p *Poller) handleJobComplete(ctx context.Context, run *ReactiveRun, success bool, failureReason string) {
 	now := time.Now().UTC()
 
+	// Update metrics
+	metrics.ReactiveAgentState.WithLabelValues(run.AgentName).Set(0)
+	if run.StartedAt != nil {
+		duration := now.Sub(*run.StartedAt).Seconds()
+		metrics.ReactiveRunDuration.WithLabelValues(run.AgentName).Observe(duration)
+	}
+	todayCount, _ := p.store.CountTodayRuns(ctx, run.AgentName)
+	metrics.ReactiveBudgetUsed.WithLabelValues(run.AgentName).Set(float64(todayCount))
+
 	if success {
+		metrics.ReactiveTriggersTotal.WithLabelValues(run.AgentName, StatusSucceeded).Inc()
 		_ = p.store.CompleteRun(ctx, run.ID, StatusSucceeded, "", now)
 		p.logger.Info("reactive run succeeded",
 			"agent", run.AgentName,
@@ -154,6 +165,7 @@ func (p *Poller) handleJobComplete(ctx context.Context, run *ReactiveRun, succes
 			errorLog = strings.Join(lines, "\n")
 		}
 
+		metrics.ReactiveTriggersTotal.WithLabelValues(run.AgentName, StatusFailed).Inc()
 		_ = p.store.CompleteRun(ctx, run.ID, StatusFailed, errorLog, now)
 
 		p.logger.Warn("reactive run failed",

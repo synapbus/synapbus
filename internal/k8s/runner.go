@@ -150,14 +150,18 @@ func (r *K8sJobRunner) CreateJob(ctx context.Context, handler *K8sHandler, msg *
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:  "handler",
-							Image: handler.Image,
-							Env:   envVars,
+							Name:            "handler",
+							Image:           handler.Image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Args:            handler.Args,
+							Env:             envVars,
+							VolumeMounts:    buildVolumeMounts(handler.VolumeMounts),
 							Resources: corev1.ResourceRequirements{
 								Limits: resourceLimits,
 							},
 						},
 					},
+					Volumes: buildVolumes(handler.Volumes),
 				},
 			},
 		},
@@ -231,6 +235,48 @@ func sanitizeJobName(name string) string {
 		name = name[:63]
 	}
 	return name
+}
+
+// buildVolumeMounts converts our VolumeMount type to K8s VolumeMounts.
+func buildVolumeMounts(mounts []VolumeMount) []corev1.VolumeMount {
+	if len(mounts) == 0 {
+		return nil
+	}
+	var result []corev1.VolumeMount
+	for _, m := range mounts {
+		result = append(result, corev1.VolumeMount{
+			Name:      m.Name,
+			MountPath: m.MountPath,
+			ReadOnly:  m.ReadOnly,
+		})
+	}
+	return result
+}
+
+// buildVolumes converts our Volume type to K8s Volumes.
+func buildVolumes(volumes []Volume) []corev1.Volume {
+	if len(volumes) == 0 {
+		return nil
+	}
+	var result []corev1.Volume
+	for _, v := range volumes {
+		vol := corev1.Volume{Name: v.Name}
+		if v.HostPath != "" {
+			hostPathType := corev1.HostPathDirectory
+			vol.VolumeSource = corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: v.HostPath,
+					Type: &hostPathType,
+				},
+			}
+		} else if v.EmptyDir {
+			vol.VolumeSource = corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			}
+		}
+		result = append(result, vol)
+	}
+	return result
 }
 
 // truncateBody truncates the message body to maxLen bytes.

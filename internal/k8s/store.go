@@ -22,6 +22,25 @@ type K8sHandler struct {
 	Status          string            `json:"status"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
+
+	// Extended fields for reactive triggers (not persisted in k8s_handlers table)
+	Args         []string          `json:"-"`
+	VolumeMounts []VolumeMount     `json:"-"`
+	Volumes      []Volume          `json:"-"`
+}
+
+// VolumeMount defines a mount point in the container.
+type VolumeMount struct {
+	Name      string
+	MountPath string
+	ReadOnly  bool
+}
+
+// Volume defines a volume source for the pod.
+type Volume struct {
+	Name     string
+	HostPath string // If set, uses hostPath volume
+	EmptyDir bool   // If true, uses emptyDir volume
 }
 
 // K8sJobRun represents a single Kubernetes job execution.

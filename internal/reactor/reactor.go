@@ -14,6 +14,7 @@ import (
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/dispatcher"
 	k8spkg "github.com/synapbus/synapbus/internal/k8s"
+	"github.com/synapbus/synapbus/internal/metrics"
 )
 
 // Reactor is the reactive agent triggering engine.
@@ -211,6 +212,9 @@ func (r *Reactor) createJob(ctx context.Context, agent *agents.Agent, event disp
 	// Clear pending_work since we're launching
 	_ = r.agentStore.SetPendingWork(ctx, agent.Name, false)
 
+	metrics.ReactiveTriggersTotal.WithLabelValues(agent.Name, StatusRunning).Inc()
+	metrics.ReactiveAgentState.WithLabelValues(agent.Name).Set(1)
+
 	r.logger.Info("reactive K8s Job created",
 		"agent", agent.Name,
 		"job", jobName,
@@ -245,17 +249,17 @@ func (r *Reactor) buildHandler(agent *agents.Agent) *k8spkg.K8sHandler {
 		}
 	}
 
-	// Resource presets
-	memory := "256Mi"
-	cpu := "100m"
-	if agent.K8sResourcePreset == "large" {
-		memory = "2Gi"
-		cpu = "1000m"
+	// Resource presets — default matches CronJob config (agent SDK needs ~1-2Gi)
+	memory := "2Gi"
+	cpu := "500m"
+	if agent.K8sResourcePreset == "small" {
+		memory = "512Mi"
+		cpu = "100m"
 	}
 
-	timeout := 600 // 10 minutes default
+	timeout := 3600 // 1 hour (matches CronJob config)
 
-	return &k8spkg.K8sHandler{
+	handler := &k8spkg.K8sHandler{
 		AgentName:       agent.Name,
 		Image:           agent.K8sImage,
 		Events:          []string{"message.received", "message.mentioned"},
@@ -265,7 +269,23 @@ func (r *Reactor) buildHandler(agent *agents.Agent) *k8spkg.K8sHandler {
 		Env:             env,
 		TimeoutSeconds:  timeout,
 		Status:          "active",
+		Args:            []string{"--max-turns", "50", "--model", "claude-sonnet-4-6"},
+		VolumeMounts: []k8spkg.VolumeMount{
+			{Name: "claude-config", MountPath: "/app/.claude", ReadOnly: false},
+			{Name: "workspace", MountPath: "/app/workspace", ReadOnly: false},
+		},
+		Volumes: []k8spkg.Volume{
+			{Name: "claude-config", HostPath: "/home/user/.claude"},
+			{Name: "workspace", EmptyDir: true},
+		},
 	}
+
+	// Override args for social-commenter (uses opus, more turns)
+	if agent.Name == "social-commenter" {
+		handler.Args = []string{"--max-turns", "80", "--model", "claude-opus-4-6"}
+	}
+
+	return handler
 }
 
 // RetryRun retries a failed run.
@@ -309,6 +329,7 @@ func (r *Reactor) RetryRun(ctx context.Context, runID int64) (*ReactiveRun, erro
 }
 
 func (r *Reactor) recordSkippedRun(ctx context.Context, agentName string, event dispatcher.MessageEvent, status, errorLog string) {
+	metrics.ReactiveTriggersTotal.WithLabelValues(agentName, status).Inc()
 	run := &ReactiveRun{
 		AgentName:    agentName,
 		TriggerEvent: event.EventType,
