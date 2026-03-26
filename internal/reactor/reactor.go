@@ -75,6 +75,13 @@ func (r *Reactor) Dispatch(ctx context.Context, event dispatcher.MessageEvent) e
 
 // evaluateTrigger runs the decision chain for a single agent.
 func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event dispatcher.MessageEvent) error {
+	// 0. Ignore system messages — stalemate worker notifications, retention warnings,
+	// and other automated DMs should NOT trigger reactive runs. They're notifications
+	// meant for the human owner, not actionable work for agents.
+	if event.FromAgent == "system" {
+		return nil
+	}
+
 	// 1. Get agent config
 	agent, err := r.agentStore.GetAgentByName(ctx, agentName)
 	if err != nil {
