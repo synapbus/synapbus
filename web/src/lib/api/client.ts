@@ -83,6 +83,11 @@ export const conversations = {
 	get: (id: number) => request<{ conversation: any; messages: any[] }>('GET', `/api/conversations/${id}`)
 };
 
+// DM Partners
+export const dmPartners = {
+	list: () => request<{ partners: any[] }>('GET', '/api/dm/partners')
+};
+
 // Agents
 export const agents = {
 	list: () => request<{ agents: any[] }>('GET', '/api/agents'),

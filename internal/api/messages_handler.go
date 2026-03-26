@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -579,6 +580,109 @@ func (h *MessagesHandler) DMMessages(w http.ResponseWriter, r *http.Request) {
 		"total":                len(msgs),
 		"last_read_message_id": lastRead,
 	})
+}
+
+// DMPartners returns a list of agents the user has DM conversations with,
+// ordered by most recent message. Each entry includes the peer agent name,
+// last message preview, timestamp, and unread count.
+func (h *MessagesHandler) DMPartners(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := OwnerIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, errorBody("unauthorized", "Authentication required"))
+		return
+	}
+
+	ownedAgents, err := h.agentService.ListAgents(r.Context(), ownerID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorBody("server_error", "Failed to list agents"))
+		return
+	}
+
+	if len(ownedAgents) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"partners": []any{}})
+		return
+	}
+
+	ownedNames := make(map[string]bool, len(ownedAgents))
+	for _, a := range ownedAgents {
+		ownedNames[a.Name] = true
+	}
+
+	// Get recent DMs for all owned agents
+	type partner struct {
+		Name        string `json:"name"`
+		DisplayName string `json:"display_name"`
+		LastMessage string `json:"last_message"`
+		LastTime    string `json:"last_time"`
+		Unread      int    `json:"unread"`
+	}
+	partnerMap := make(map[string]*partner)
+
+	for _, agent := range ownedAgents {
+		opts := messaging.ReadOptions{
+			Limit:       200,
+			IncludeRead: true,
+		}
+		result, err := h.msgService.ReadInbox(r.Context(), agent.Name, opts)
+		if err != nil {
+			continue
+		}
+		for _, msg := range result.Messages {
+			if msg.ChannelID != nil {
+				continue // skip channel messages
+			}
+			// Determine the peer (the other party in the DM)
+			peer := msg.FromAgent
+			if ownedNames[peer] {
+				peer = msg.ToAgent
+			}
+			if peer == "" || ownedNames[peer] {
+				continue // skip self-to-self
+			}
+
+			existing, exists := partnerMap[peer]
+			if !exists {
+				partnerMap[peer] = &partner{
+					Name:        peer,
+					DisplayName: peer,
+					LastMessage: truncateStr(msg.Body, 80),
+					LastTime:    msg.CreatedAt.Format(time.RFC3339),
+					Unread:      0,
+				}
+				existing = partnerMap[peer]
+			}
+
+			// Track newest message
+			lt, _ := time.Parse(time.RFC3339, existing.LastTime)
+			if msg.CreatedAt.After(lt) {
+				existing.LastMessage = truncateStr(msg.Body, 80)
+				existing.LastTime = msg.CreatedAt.Format(time.RFC3339)
+			}
+
+			// Count unread (pending messages TO owned agents)
+			if ownedNames[msg.ToAgent] && (msg.Status == "pending" || msg.Status == "processing") {
+				existing.Unread++
+			}
+		}
+	}
+
+	// Resolve display names
+	for peer, p := range partnerMap {
+		if a, err := h.agentService.GetAgent(r.Context(), peer); err == nil {
+			p.DisplayName = a.DisplayName
+		}
+	}
+
+	// Sort by last_time descending
+	partners := make([]*partner, 0, len(partnerMap))
+	for _, p := range partnerMap {
+		partners = append(partners, p)
+	}
+	sort.Slice(partners, func(i, j int) bool {
+		return partners[i].LastTime > partners[j].LastTime
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"partners": partners})
 }
 
 func (h *MessagesHandler) isAgentOwnedBy(r *http.Request, agentName string, ownerID int64) bool {

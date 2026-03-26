@@ -3,12 +3,13 @@
 	import { goto } from '$app/navigation';
 	import { user, logout } from '$lib/stores/auth';
 	import { notifications } from '$lib/stores/notifications';
-	import { channels as channelsApi, agents as agentsApi, deadLetters as deadLettersApi } from '$lib/api/client';
+	import { channels as channelsApi, agents as agentsApi, deadLetters as deadLettersApi, dmPartners as dmPartnersApi } from '$lib/api/client';
 
 	let { open = false, onclose = () => {} }: { open?: boolean; onclose?: () => void } = $props();
 
 	let channelList = $state<any[]>([]);
 	let agentList = $state<any[]>([]);
+	let dmPartnerList = $state<any[]>([]);
 	let deadLetterCount = $state(0);
 
 	let channelsExpanded = $state(true);
@@ -25,14 +26,16 @@
 
 	async function loadSidebarData() {
 		try {
-			const [chRes, agRes, dlRes] = await Promise.all([
+			const [chRes, agRes, dlRes, dmRes] = await Promise.all([
 				channelsApi.list(),
 				agentsApi.list(),
-				deadLettersApi.count().catch(() => ({ count: 0 }))
+				deadLettersApi.count().catch(() => ({ count: 0 })),
+				dmPartnersApi.list().catch(() => ({ partners: [] }))
 			]);
 			channelList = chRes.channels ?? [];
 			agentList = agRes.agents ?? [];
 			deadLetterCount = dlRes.count ?? 0;
+			dmPartnerList = dmRes.partners ?? [];
 		} catch {
 			// handled
 		}
@@ -55,15 +58,8 @@
 		return count > 99 ? '99+' : String(count);
 	}
 
-	// Filter DM list: only show human agents + AI agents with unread DMs.
-	// This hides agent-to-agent internal conversations from the sidebar.
-	let dmAgentList = $derived(
-		agentList.filter(agent => {
-			if (agent.type !== 'ai') return true;
-			const unread = $notifications.dms.get(agent.name) ?? 0;
-			return unread > 0;
-		})
-	);
+	// DM partners list is loaded from the API — shows agents you have
+	// actual conversations with, ordered by most recent message.
 
 	const adminLinks = [
 		{ href: '/agents', label: 'Agents' },
@@ -219,30 +215,23 @@
 			</button>
 			{#if dmsExpanded}
 				<div class="mt-0.5">
-					{#if dmAgentList.length === 0}
-						<p class="px-3 py-1 text-xs text-text-secondary italic">No agents</p>
+					{#if dmPartnerList.length === 0}
+						<p class="px-3 py-1 text-xs text-text-secondary italic">No conversations</p>
 					{:else}
-						{#each dmAgentList as agent}
-							{@const dmUnread = $notifications.dms.get(agent.name) ?? 0}
+						{#each dmPartnerList as partner}
 							<a
-								href="/dm/{agent.name}"
-								class="sidebar-item {isActive('/dm/' + agent.name) ? 'sidebar-item-active' : ''}"
+								href="/dm/{partner.name}"
+								class="sidebar-item {isActive('/dm/' + partner.name) ? 'sidebar-item-active' : ''}"
 								onclick={handleNavClick}
 							>
 								<span class="relative flex-shrink-0">
 									<span class="w-5 h-5 rounded-full bg-bg-tertiary flex items-center justify-center text-[10px] font-bold text-text-secondary">
-										{(agent.display_name || agent.name).charAt(0).toUpperCase()}
+										{(partner.display_name || partner.name).charAt(0).toUpperCase()}
 									</span>
-									<span
-										class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-bg-secondary {agent.status === 'active' ? 'bg-accent-green' : 'bg-text-secondary'}"
-									></span>
 								</span>
-								<span class="truncate {dmUnread > 0 ? 'font-bold text-text-primary' : ''}">{agent.display_name || agent.name}</span>
-								<span class="text-[9px] text-text-secondary flex-shrink-0">(you)</span>
-								{#if dmUnread > 0}
-									<span class="ml-auto text-[10px] font-bold text-white bg-accent-red px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex-shrink-0">{badgeText(dmUnread)}</span>
-								{:else if agent.type === 'ai'}
-									<span class="ml-auto text-[9px] font-mono text-accent-purple bg-accent-purple/10 px-1 rounded flex-shrink-0">AI</span>
+								<span class="truncate {partner.unread > 0 ? 'font-bold text-text-primary' : ''}">{partner.display_name || partner.name}</span>
+								{#if partner.unread > 0}
+									<span class="ml-auto text-[10px] font-bold text-white bg-accent-red px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex-shrink-0">{badgeText(partner.unread)}</span>
 								{/if}
 							</a>
 						{/each}
