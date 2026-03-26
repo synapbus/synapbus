@@ -4,11 +4,11 @@ import (
 	"testing"
 )
 
-func TestRegistryHas29Actions(t *testing.T) {
+func TestRegistryHas30Actions(t *testing.T) {
 	r := NewRegistry()
 	got := len(r.List())
-	if got != 29 {
-		t.Errorf("expected 29 actions, got %d", got)
+	if got != 30 {
+		t.Errorf("expected 30 actions, got %d", got)
 	}
 }
 
@@ -58,6 +58,8 @@ func TestRegistryGetByName(t *testing.T) {
 		"get_replies",
 		// trust
 		"get_trust",
+		// data
+		"query",
 	}
 
 	for _, name := range allNames {

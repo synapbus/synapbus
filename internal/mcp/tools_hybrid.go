@@ -17,6 +17,7 @@ import (
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/jsruntime"
+	"github.com/synapbus/synapbus/internal/agentquery"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
@@ -37,7 +38,13 @@ type HybridToolRegistrar struct {
 	actionRegistry    *actions.Registry
 	actionIndex       *actions.Index
 	db                *sql.DB
+	queryExecutor     *agentquery.Executor
 	logger            *slog.Logger
+}
+
+// SetQueryExecutor sets the SQL query executor for all agent bridges.
+func (h *HybridToolRegistrar) SetQueryExecutor(exec *agentquery.Executor) {
+	h.queryExecutor = exec
 }
 
 // NewHybridToolRegistrar creates a new hybrid tool registrar.
@@ -495,6 +502,9 @@ func (h *HybridToolRegistrar) handleExecute(ctx context.Context, req mcplib.Call
 		h.trustService,
 		agentName,
 	)
+	if h.queryExecutor != nil {
+		bridge.SetQueryExecutor(h.queryExecutor)
+	}
 
 	result, err := h.jsPool.Execute(ctx, code, bridge, jsruntime.ExecuteOptions{
 		Timeout: timeout,

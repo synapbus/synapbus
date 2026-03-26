@@ -39,6 +39,7 @@ import (
 	"github.com/synapbus/synapbus/internal/jsruntime"
 	k8spkg "github.com/synapbus/synapbus/internal/k8s"
 	mcpserver "github.com/synapbus/synapbus/internal/mcp"
+	"github.com/synapbus/synapbus/internal/agentquery"
 	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/messaging"
 	prommetrics "github.com/synapbus/synapbus/internal/metrics"
@@ -492,6 +493,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create MCP server (4 hybrid tools: my_status, send_message, search, execute)
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, con, jsPool, actionRegistry, actionIndex, db.DB)
+
+	// Set up SQL query executor for agents (uses read pool if available)
+	queryDB := db.QueryDB()
+	queryExec := agentquery.New(queryDB, slog.Default())
+	mcpSrv.SetQueryExecutor(queryExec)
+	slog.Info("agent SQL query executor initialized", "read_pool", db.ReadDB != nil)
+
 	startTime := time.Now()
 
 	// Start task expiry worker

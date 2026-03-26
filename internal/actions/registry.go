@@ -571,5 +571,33 @@ func allActions() []Action {
 				},
 			},
 		},
+		// ── SQL Query (1 action) ────────────────────────────────────
+		{
+			Name:        "query",
+			Category:    "data",
+			Description: "Execute a read-only SQL query against your accessible messages, channels, and reactions. Use tables: my_messages (your DMs + joined channels), my_channels (channels you are in), channel_messages (messages in your channels). Results are limited to 100 rows. Only SELECT statements are allowed.",
+			Params: []Param{
+				{Name: "sql", Type: "string", Description: "SQL SELECT query. Available tables: my_messages (id, body, from_agent, to_agent, priority, status, metadata, created_at, channel_name), my_channels (id, name, description, type), channel_messages (id, body, from_agent, priority, channel_name, created_at). CTEs (WITH) are supported.", Required: true},
+			},
+			Returns: "JSON with columns (array of column names), rows (array of row arrays), row_count, and truncated (boolean if > 100 rows)",
+			Examples: []Example{
+				{
+					Description: "Find high-priority messages in a channel",
+					Code:        `call("query", {"sql": "SELECT id, body, from_agent, priority FROM channel_messages WHERE channel_name = 'news-mcpproxy' AND priority >= 7 ORDER BY created_at DESC LIMIT 10"})`,
+				},
+				{
+					Description: "List your channels",
+					Code:        `call("query", {"sql": "SELECT name, description FROM my_channels ORDER BY name"})`,
+				},
+				{
+					Description: "Count messages per channel",
+					Code:        `call("query", {"sql": "SELECT channel_name, COUNT(*) as msg_count FROM channel_messages GROUP BY channel_name ORDER BY msg_count DESC"})`,
+				},
+				{
+					Description: "Search messages with keyword",
+					Code:        `call("query", {"sql": "SELECT id, body, from_agent, created_at FROM my_messages WHERE body LIKE '%MCP%' ORDER BY created_at DESC LIMIT 20"})`,
+				},
+			},
+		},
 	}
 }

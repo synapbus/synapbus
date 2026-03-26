@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/synapbus/synapbus/internal/actions"
+	"github.com/synapbus/synapbus/internal/agentquery"
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
@@ -26,12 +27,13 @@ import (
 
 // MCPServer wraps the mcp-go server with SynapBus services.
 type MCPServer struct {
-	mcpServer    *server.MCPServer
-	httpServer   *server.StreamableHTTPServer
-	connMgr      *ConnectionManager
-	agentService *agents.AgentService
-	logger       *slog.Logger
-	console      *console.Printer
+	mcpServer        *server.MCPServer
+	httpServer       *server.StreamableHTTPServer
+	connMgr          *ConnectionManager
+	agentService     *agents.AgentService
+	hybridRegistrar  *HybridToolRegistrar
+	logger           *slog.Logger
+	console          *console.Printer
 }
 
 // NewMCPServer creates and configures a new MCP server with 4 hybrid tools registered.
@@ -187,16 +189,24 @@ func NewMCPServer(
 	)
 
 	s := &MCPServer{
-		mcpServer:    mcpSrv,
-		httpServer:   httpServer,
-		connMgr:      connMgr,
-		agentService: agentService,
-		logger:       logger,
-		console:      consolePrinter,
+		mcpServer:       mcpSrv,
+		httpServer:      httpServer,
+		connMgr:         connMgr,
+		agentService:    agentService,
+		hybridRegistrar: hybridRegistrar,
+		logger:          logger,
+		console:         consolePrinter,
 	}
 
 	logger.Info("MCP server initialized (4 hybrid tools, 4 prompts, streamable HTTP transport)")
 	return s
+}
+
+// SetQueryExecutor sets the SQL query executor for agent queries via the execute tool.
+func (s *MCPServer) SetQueryExecutor(exec *agentquery.Executor) {
+	if s.hybridRegistrar != nil {
+		s.hybridRegistrar.SetQueryExecutor(exec)
+	}
 }
 
 // Handler returns the HTTP handler for mounting on a router.

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/synapbus/synapbus/internal/agents"
+	"github.com/synapbus/synapbus/internal/agentquery"
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/messaging"
@@ -31,6 +32,7 @@ type ServiceBridge struct {
 	searchService     *search.Service
 	reactionService   *reactions.Service
 	trustService      *trust.Service
+	queryExecutor     *agentquery.Executor
 	agentName         string
 }
 
@@ -129,6 +131,10 @@ func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[st
 	// --- Trust ---
 	case "get_trust":
 		return b.callGetTrust(ctx, args)
+
+	// --- SQL Query ---
+	case "query":
+		return b.callQuery(ctx, args)
 
 	// --- DM send (also accessible via bridge for execute tool) ---
 	case "send_message":
@@ -1213,6 +1219,29 @@ func (b *ServiceBridge) callGetTrust(ctx context.Context, args map[string]any) (
 		"agent_name": agentName,
 		"scores":     scores,
 	}, nil
+}
+
+// SetQueryExecutor sets the SQL query executor for the bridge.
+func (b *ServiceBridge) SetQueryExecutor(exec *agentquery.Executor) {
+	b.queryExecutor = exec
+}
+
+func (b *ServiceBridge) callQuery(ctx context.Context, args map[string]any) (any, error) {
+	if b.queryExecutor == nil {
+		return nil, fmt.Errorf("SQL query not available")
+	}
+
+	sqlStr := getString(args, "sql", "")
+	if sqlStr == "" {
+		return nil, fmt.Errorf("sql parameter is required")
+	}
+
+	result, err := b.queryExecutor.Execute(ctx, b.agentName, sqlStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // --- Helpers ---
