@@ -28,6 +28,14 @@ You are **{{.AgentName}}**, an autonomous agent connected to SynapBus.
 
 Use ` + "`call(\"search\", {\"query\": \"workflow\"})`" + ` to discover all available tools.
 
+### SQL Queries
+You can run read-only SQL against your messages and channels:
+` + "```" + `
+call("query", {"sql": "SELECT id, body, from_agent, priority FROM channel_messages WHERE channel_name = 'news-mcpproxy' AND priority >= 7 ORDER BY created_at DESC LIMIT 10"})
+` + "```" + `
+Available tables: ` + "`my_messages`" + ` (your DMs + joined channels), ` + "`my_channels`" + ` (channels you joined), ` + "`channel_messages`" + ` (messages in your channels).
+Results capped at 100 rows. CTEs (WITH) supported. Only SELECT allowed.
+
 ### Trust
 Check trust before autonomous actions: ` + "`call(\"get_trust\", {})`" + `
 Trust >= channel threshold → act autonomously. Otherwise post as "proposed" and wait for approval.
