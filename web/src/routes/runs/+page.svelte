@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { runs } from '$lib/api/client';
-	import { onMount } from 'svelte';
+	import { user } from '$lib/stores/auth';
 
 	let runsList = $state<any[]>([]);
 	let total = $state(0);
@@ -9,11 +9,21 @@
 	let filterStatus = $state('');
 	let loading = $state(true);
 	let expandedRun = $state<number | null>(null);
+	let _intervalId: ReturnType<typeof setInterval> | null = null;
+	let _initialized = $state(false);
 
-	onMount(() => {
-		loadData();
-		const interval = setInterval(loadData, 10000);
-		return () => clearInterval(interval);
+	$effect(() => {
+		if (!_initialized && $user) {
+			_initialized = true;
+			loadData();
+			_intervalId = setInterval(loadData, 10000);
+		}
+		return () => {
+			if (_intervalId) {
+				clearInterval(_intervalId);
+				_intervalId = null;
+			}
+		};
 	});
 
 	async function loadData() {
@@ -25,8 +35,8 @@
 			runsList = runsRes.runs ?? [];
 			total = runsRes.total;
 			reactiveAgents = agentsRes.agents ?? [];
-		} catch {
-			// handled
+		} catch (e) {
+			console.error('Failed to load runs data:', e);
 		}
 		loading = false;
 	}
@@ -121,13 +131,13 @@
 
 	<!-- Filters -->
 	<div class="filters">
-		<select bind:value={filterAgent} onchange={loadData}>
+		<select bind:value={filterAgent} onchange={() => loadData()}>
 			<option value="">All agents</option>
 			{#each reactiveAgents as agent}
 				<option value={agent.name}>{agent.name}</option>
 			{/each}
 		</select>
-		<select bind:value={filterStatus} onchange={loadData}>
+		<select bind:value={filterStatus} onchange={() => loadData()}>
 			<option value="">All statuses</option>
 			<option value="running">Running</option>
 			<option value="succeeded">Succeeded</option>
