@@ -25,11 +25,21 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 	const res = await fetch(path, opts);
 
 	if (res.status === 401) {
-		// Redirect to login on auth failure
-		if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+		// On login page, pass through the actual error message
+		if (typeof window !== 'undefined' && window.location.pathname.startsWith('/login')) {
+			const err = await res.json().catch(() => ({ error: 'unauthorized', message: 'Invalid username or password' }));
+			throw new ApiError(401, err.error || 'unauthorized', err.message || 'Invalid username or password');
+		}
+		// Elsewhere, redirect to login
+		if (typeof window !== 'undefined') {
 			window.location.href = `/login?return=${encodeURIComponent(window.location.pathname)}`;
 		}
 		throw new ApiError(401, 'unauthorized', 'Session expired');
+	}
+
+	if (res.status === 429) {
+		const err = await res.json().catch(() => ({ message: 'Too many attempts. Please wait and try again.' }));
+		throw new ApiError(429, 'rate_limited', err.message || 'Too many attempts. Please wait and try again.');
 	}
 
 	if (!res.ok) {

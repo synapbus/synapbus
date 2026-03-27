@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ory/fosite"
@@ -36,6 +37,63 @@ type Handlers struct {
 	config       Config
 	agentLister  AgentLister
 	logger       *slog.Logger
+	loginLimiter *loginRateLimiter
+}
+
+// loginRateLimiter tracks failed login attempts per IP.
+type loginRateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]*loginAttempt
+}
+
+type loginAttempt struct {
+	failures  int
+	blockedAt time.Time
+}
+
+const (
+	maxLoginFailures = 3
+	loginBlockTime   = 1 * time.Minute
+)
+
+func newLoginRateLimiter() *loginRateLimiter {
+	return &loginRateLimiter{attempts: make(map[string]*loginAttempt)}
+}
+
+func (l *loginRateLimiter) isBlocked(ip string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.attempts[ip]
+	if !ok {
+		return false, 0
+	}
+	if a.failures >= maxLoginFailures && time.Since(a.blockedAt) < loginBlockTime {
+		remaining := loginBlockTime - time.Since(a.blockedAt)
+		return true, remaining
+	}
+	if time.Since(a.blockedAt) >= loginBlockTime {
+		delete(l.attempts, ip)
+		return false, 0
+	}
+	return false, 0
+}
+
+func (l *loginRateLimiter) recordFailure(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.attempts[ip]
+	if !ok {
+		a = &loginAttempt{}
+		l.attempts[ip] = a
+	}
+	a.failures++
+	a.blockedAt = time.Now()
+}
+
+func (l *loginRateLimiter) clearFailures(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.attempts, ip)
 }
 
 // NewHandlers creates a new set of auth HTTP handlers.
@@ -53,6 +111,7 @@ func NewHandlers(
 		provider:     provider,
 		config:       config,
 		logger:       slog.Default().With("component", "auth"),
+		loginLimiter: newLoginRateLimiter(),
 	}
 }
 
@@ -116,6 +175,20 @@ func (h *Handlers) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Brute-force protection: block IP after 3 failed attempts for 1 minute
+	ip := remoteIP(r)
+	if blocked, remaining := h.loginLimiter.isBlocked(ip); blocked {
+		secs := int(remaining.Seconds()) + 1
+		LogAuthEvent(r.Context(), h.logger, AuthEvent{
+			Type:     EventLoginFailure,
+			Username: "(rate-limited)",
+			RemoteIP: ip,
+		})
+		writeError(w, http.StatusTooManyRequests, "rate_limited",
+			fmt.Sprintf("Too many login attempts. Try again in %d seconds.", secs))
+		return
+	}
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -128,14 +201,18 @@ func (h *Handlers) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.userStore.VerifyPassword(r.Context(), req.Username, req.Password)
 	if err != nil {
+		h.loginLimiter.recordFailure(ip)
 		LogAuthEvent(r.Context(), h.logger, AuthEvent{
 			Type:     EventLoginFailure,
 			Username: req.Username,
-			RemoteIP: remoteIP(r),
+			RemoteIP: ip,
 		})
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid username or password")
 		return
 	}
+
+	// Successful login — clear rate limit
+	h.loginLimiter.clearFailures(ip)
 
 	session, err := h.sessionStore.CreateSession(r.Context(), user.ID, h.config.SessionLifetime)
 	if err != nil {
