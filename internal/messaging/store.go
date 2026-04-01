@@ -441,6 +441,32 @@ func (s *SQLiteMessageStore) CountSearchMessages(ctx context.Context, agentName,
 	return count, nil
 }
 
+// sanitizeFTS5Query escapes FTS5 reserved words and operators by wrapping each
+// token in double quotes, turning them into literal phrase tokens. Without this,
+// words like "to", "from", "and", "or", "not", "near" are interpreted as FTS5
+// operators and cause SQL errors such as: no such column: to.
+func sanitizeFTS5Query(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ""
+	}
+
+	tokens := strings.Fields(query)
+	quoted := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		// Already double-quoted — leave as-is
+		if len(tok) >= 2 && tok[0] == '"' && tok[len(tok)-1] == '"' {
+			quoted = append(quoted, tok)
+			continue
+		}
+		// Wrap in double quotes to make it a literal FTS5 phrase.
+		// Escape any embedded double quotes by doubling them.
+		escaped := strings.ReplaceAll(tok, `"`, `""`)
+		quoted = append(quoted, `"`+escaped+`"`)
+	}
+	return strings.Join(quoted, " ")
+}
+
 // buildSearchConditions builds the WHERE conditions, args, JOIN clause, and ORDER clause for search queries.
 func (s *SQLiteMessageStore) buildSearchConditions(agentName, query string, opts SearchOptions) ([]string, []any, string, string) {
 	var conditions []string
@@ -458,7 +484,7 @@ func (s *SQLiteMessageStore) buildSearchConditions(agentName, query string, opts
 	if query != "" {
 		joinClause = "JOIN messages_fts ON messages_fts.rowid = m.id"
 		conditions = append(conditions, "messages_fts MATCH ?")
-		args = append(args, query)
+		args = append(args, sanitizeFTS5Query(query))
 		orderClause = "ORDER BY rank"
 	} else {
 		orderClause = "ORDER BY m.created_at DESC"

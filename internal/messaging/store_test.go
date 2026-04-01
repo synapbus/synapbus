@@ -1218,3 +1218,120 @@ func TestSQLiteMessageStore_CombinedFiltersAndPagination(t *testing.T) {
 		}
 	})
 }
+
+func TestSanitizeFTS5Query(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "normal words",
+			input: "hello world",
+			want:  `"hello" "world"`,
+		},
+		{
+			name:  "hyphenated token",
+			input: "agent-to-agent messaging",
+			want:  `"agent-to-agent" "messaging"`,
+		},
+		{
+			name:  "reserved words",
+			input: "from agent to channel",
+			want:  `"from" "agent" "to" "channel"`,
+		},
+		{
+			name:  "empty query",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "whitespace only",
+			input: "   ",
+			want:  "",
+		},
+		{
+			name:  "already quoted token preserved",
+			input: `"hello" world`,
+			want:  `"hello" "world"`,
+		},
+		{
+			name:  "single reserved word",
+			input: "to",
+			want:  `"to"`,
+		},
+		{
+			name:  "FTS5 operators",
+			input: "not working or broken and failing near crash",
+			want:  `"not" "working" "or" "broken" "and" "failing" "near" "crash"`,
+		},
+		{
+			name:  "competitors building agent-to-agent messaging",
+			input: "competitors building agent-to-agent messaging",
+			want:  `"competitors" "building" "agent-to-agent" "messaging"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeFTS5Query(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeFTS5Query(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSQLiteMessageStore_SearchMessages_ReservedWords(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteMessageStore(db)
+	ctx := context.Background()
+
+	seedAgent(t, db, "sender")
+	seedAgent(t, db, "searcher")
+
+	conv := &Conversation{Subject: "reserved words test", CreatedBy: "sender"}
+	if err := store.InsertConversation(ctx, conv); err != nil {
+		t.Fatalf("InsertConversation: %v", err)
+	}
+
+	msg := &Message{
+		ConversationID: conv.ID,
+		FromAgent:      "sender",
+		ToAgent:        "searcher",
+		Body:           "send message to agent from channel not working",
+		Priority:       5,
+		Status:         StatusPending,
+	}
+	if err := store.InsertMessage(ctx, msg); err != nil {
+		t.Fatalf("InsertMessage: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		query   string
+		wantMin int // minimum expected results
+	}{
+		{"reserved word: to", "to", 1},
+		{"reserved word: from", "from", 1},
+		{"reserved word: not", "not", 1},
+		{"reserved word: and", "and", 0},     // 'and' is not in the message body
+		{"reserved word: or", "or", 0},       // 'or' is not in the message body
+		{"reserved word: near", "near", 0},   // 'near' is not in the message body
+		{"multi-word with reserved", "from agent", 1},
+		{"phrase: not working", "not working", 1},
+		{"phrase: to agent", "to agent", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := store.SearchMessages(ctx, "searcher", tt.query, SearchOptions{})
+			if err != nil {
+				t.Fatalf("SearchMessages(%q) unexpected error: %v", tt.query, err)
+			}
+			if len(results) < tt.wantMin {
+				t.Errorf("SearchMessages(%q) got %d results, want at least %d", tt.query, len(results), tt.wantMin)
+			}
+		})
+	}
+}
