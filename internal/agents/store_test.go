@@ -246,5 +246,3 @@ func TestSQLiteAgentStore_SearchByCapability(t *testing.T) {
 		}
 	})
 }
-
-var _ = storage.RunMigrations

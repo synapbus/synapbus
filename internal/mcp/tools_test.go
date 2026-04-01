@@ -522,5 +522,3 @@ func TestHybridTool_GetReplies(t *testing.T) {
 		}
 	})
 }
-
-var _ = storage.RunMigrations

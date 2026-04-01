@@ -466,6 +466,3 @@ func TestSQLiteChannelStore_Invites(t *testing.T) {
 		}
 	})
 }
-
-// suppress unused import warning
-var _ = storage.RunMigrations

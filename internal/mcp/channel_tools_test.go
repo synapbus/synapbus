@@ -13,7 +13,6 @@ import (
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/jsruntime"
 	"github.com/synapbus/synapbus/internal/messaging"
-	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/trace"
 )
 
@@ -222,6 +221,3 @@ func TestBridge_ChannelOperations(t *testing.T) {
 		}
 	})
 }
-
-// suppress unused import
-var _ = storage.RunMigrations

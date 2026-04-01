@@ -11,7 +11,6 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/synapbus/synapbus/internal/messaging"
-	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/trace"
 )
 
@@ -965,6 +964,3 @@ func TestService_JoinMyAgentsChannel_NoChannelIsNoop(t *testing.T) {
 		t.Fatalf("JoinMyAgentsChannel should be no-op when channel missing: %v", err)
 	}
 }
-
-// suppress unused import warning
-var _ = storage.RunMigrations

@@ -8,7 +8,6 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/trace"
 )
 
@@ -818,6 +817,3 @@ func TestMessagingService_EnrichMessages(t *testing.T) {
 		// Should not panic or error.
 	})
 }
-
-// suppress unused import warning for storage package
-var _ = storage.RunMigrations

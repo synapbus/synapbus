@@ -11,7 +11,6 @@ import (
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
-	"github.com/synapbus/synapbus/internal/storage"
 	"github.com/synapbus/synapbus/internal/trace"
 )
 
@@ -482,5 +481,3 @@ func TestBridge_React_Toggle_Removes_WorkflowState(t *testing.T) {
 		t.Errorf("workflow_state = %v, want proposed", state)
 	}
 }
-
-var _ = storage.RunMigrations
