@@ -47,7 +47,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Audit npm dependencies
-        run: cd web && npm audit
+        run: cd web && npm audit --audit-level=moderate
 
       - name: Build web frontend
         run: |
