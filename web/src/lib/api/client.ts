@@ -314,6 +314,23 @@ export const onboarding = {
 	}
 };
 
+// Wiki
+export const wiki = {
+	list: (opts?: { q?: string; limit?: number }) => {
+		const qs = new URLSearchParams();
+		if (opts?.q) qs.set('q', opts.q);
+		if (opts?.limit) qs.set('limit', String(opts.limit));
+		const query = qs.toString();
+		return request<{ articles: any[] }>('GET', `/api/wiki/articles${query ? '?' + query : ''}`);
+	},
+	get: (slug: string) =>
+		request<any>('GET', `/api/wiki/articles/${slug}`),
+	getHistory: (slug: string) =>
+		request<{ revisions: any[] }>('GET', `/api/wiki/articles/${slug}/history`),
+	getMap: () =>
+		request<any>('GET', `/api/wiki/map`)
+};
+
 // Reactive Runs
 export const runs = {
 	list: (params?: { agent?: string; status?: string; limit?: number; offset?: number }) => {
