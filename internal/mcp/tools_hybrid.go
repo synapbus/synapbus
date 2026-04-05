@@ -22,6 +22,7 @@ import (
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/trust"
+	"github.com/synapbus/synapbus/internal/wiki"
 )
 
 // HybridToolRegistrar registers the 4 hybrid MCP tools.
@@ -34,6 +35,7 @@ type HybridToolRegistrar struct {
 	searchService     *search.Service
 	reactionService   *reactions.Service
 	trustService      *trust.Service
+	wikiService       *wiki.Service
 	jsPool            *jsruntime.Pool
 	actionRegistry    *actions.Registry
 	actionIndex       *actions.Index
@@ -57,6 +59,7 @@ func NewHybridToolRegistrar(
 	searchService *search.Service,
 	reactionService *reactions.Service,
 	trustService *trust.Service,
+	wikiService *wiki.Service,
 	jsPool *jsruntime.Pool,
 	actionRegistry *actions.Registry,
 	actionIndex *actions.Index,
@@ -71,6 +74,7 @@ func NewHybridToolRegistrar(
 		searchService:     searchService,
 		reactionService:   reactionService,
 		trustService:      trustService,
+		wikiService:       wikiService,
 		jsPool:            jsPool,
 		actionRegistry:    actionRegistry,
 		actionIndex:       actionIndex,
@@ -500,6 +504,7 @@ func (h *HybridToolRegistrar) handleExecute(ctx context.Context, req mcplib.Call
 		h.searchService,
 		h.reactionService,
 		h.trustService,
+		h.wikiService,
 		agentName,
 	)
 	if h.queryExecutor != nil {

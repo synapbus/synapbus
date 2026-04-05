@@ -70,6 +70,7 @@ func newTestHybridRegistrar(t *testing.T) (*HybridToolRegistrar, *messaging.Mess
 		nil, // searchService
 		nil, // reactionService
 		nil, // trustService
+		nil, // wikiService
 		jsPool,
 		actionRegistry,
 		actionIndex,

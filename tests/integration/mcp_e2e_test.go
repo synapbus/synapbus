@@ -126,7 +126,7 @@ func setupEnv(t *testing.T) *testEnv {
 	actionIndex := actions.NewIndex(actionRegistry.List())
 
 	// Create MCP server with 4 hybrid tools
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attService, searchService, nil, nil, con, jsPool, actionRegistry, actionIndex, db)
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attService, searchService, nil, nil, nil, con, jsPool, actionRegistry, actionIndex, db)
 	t.Cleanup(func() {
 		mcpSrv.Shutdown(context.Background())
 	})

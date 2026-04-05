@@ -38,7 +38,7 @@ func newTestMCPServer(t *testing.T, con *console.Printer) (*MCPServer, *messagin
 	actionRegistry := actions.NewRegistry()
 	actionIndex := actions.NewIndex(actionRegistry.List())
 
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, con, jsPool, actionRegistry, actionIndex, db)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil, con, jsPool, actionRegistry, actionIndex, db)
 	return srv, msgService, agentService
 }
 
@@ -133,7 +133,7 @@ func TestMCPToolCall_WithValidAPIKey(t *testing.T) {
 	actionIndex := actions.NewIndex(actionRegistry.List())
 
 	// Create MCP server
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil, jsPool, actionRegistry, actionIndex, db)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil, nil, jsPool, actionRegistry, actionIndex, db)
 
 	// Mount with auth middleware, just like main.go does
 	mux := http.NewServeMux()
@@ -188,7 +188,7 @@ func TestMCPToolCall_InvalidAPIKeyReturns401(t *testing.T) {
 	actionRegistry := actions.NewRegistry()
 	actionIndex := actions.NewIndex(actionRegistry.List())
 
-	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil, jsPool, actionRegistry, actionIndex, db)
+	srv := NewMCPServer(msgService, agentService, nil, nil, nil, nil, nil, nil, nil, nil, jsPool, actionRegistry, actionIndex, db)
 
 	mux := http.NewServeMux()
 	handler := agents.OptionalAuthMiddlewareWithAPIKeys(agentService, apiKeyService)(srv.Handler())

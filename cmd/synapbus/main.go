@@ -51,6 +51,7 @@ import (
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/web"
+	"github.com/synapbus/synapbus/internal/wiki"
 	"github.com/synapbus/synapbus/internal/webhooks"
 )
 
@@ -492,7 +493,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	actionIndex := actions.NewIndex(actionRegistry.List())
 
 	// Create MCP server (4 hybrid tools: my_status, send_message, search, execute)
-	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, con, jsPool, actionRegistry, actionIndex, db.DB)
+	wikiService := wiki.NewService(db.DB)
+
+	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, wikiService, con, jsPool, actionRegistry, actionIndex, db.DB)
 
 	// Set up SQL query executor for agents (uses read pool if available)
 	queryDB := db.QueryDB()
@@ -664,6 +667,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ReactorStore:      reactorStore,
 		ReactorEngine:     reactorEngine,
 		BaseURL:           baseURL,
+		WikiService:       wikiService,
 	})
 	r.Mount("/", apiRouter)
 

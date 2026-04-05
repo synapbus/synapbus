@@ -47,6 +47,7 @@ func newTestBridge(t *testing.T) (*ServiceBridge, *messaging.MessagingService, *
 		nil, // searchService
 		nil, // reactionService
 		nil, // trustService
+		nil, // wikiService
 		"agent-a",
 	)
 	return bridge, msgService, agentService, channelService
@@ -189,7 +190,7 @@ func TestBridge_JoinChannel(t *testing.T) {
 		bridge.agentService,
 		bridge.channelService,
 		bridge.swarmService,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, nil,
 		"agent-b",
 	)
 
@@ -331,6 +332,7 @@ func newTestBridgeWithReactions(t *testing.T) (*ServiceBridge, *channels.Service
 		nil, // searchService
 		reactionService,
 		nil, // trustService
+		nil, // wikiService
 		"agent-a",
 	)
 	return bridge, channelService

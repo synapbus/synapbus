@@ -23,6 +23,7 @@ import (
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/trust"
+	"github.com/synapbus/synapbus/internal/wiki"
 )
 
 // MCPServer wraps the mcp-go server with SynapBus services.
@@ -36,7 +37,7 @@ type MCPServer struct {
 	console          *console.Printer
 }
 
-// NewMCPServer creates and configures a new MCP server with 4 hybrid tools registered.
+// NewMCPServer creates and configures a new MCP server with 5 hybrid tools registered.
 func NewMCPServer(
 	msgService *messaging.MessagingService,
 	agentService *agents.AgentService,
@@ -46,6 +47,7 @@ func NewMCPServer(
 	searchService *search.Service,
 	reactionService *reactions.Service,
 	trustService *trust.Service,
+	wikiService *wiki.Service,
 	consolePrinter *console.Printer,
 	jsPool *jsruntime.Pool,
 	actionRegistry *actions.Registry,
@@ -161,6 +163,7 @@ func NewMCPServer(
 		searchService,
 		reactionService,
 		trustService,
+		wikiService,
 		jsPool,
 		actionRegistry,
 		actionIndex,

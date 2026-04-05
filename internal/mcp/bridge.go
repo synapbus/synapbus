@@ -19,6 +19,7 @@ import (
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/trust"
+	"github.com/synapbus/synapbus/internal/wiki"
 )
 
 // ServiceBridge implements jsruntime.ToolCaller, mapping action names to
@@ -32,6 +33,7 @@ type ServiceBridge struct {
 	searchService     *search.Service
 	reactionService   *reactions.Service
 	trustService      *trust.Service
+	wikiService       *wiki.Service
 	queryExecutor     *agentquery.Executor
 	agentName         string
 }
@@ -46,6 +48,7 @@ func NewServiceBridge(
 	searchService *search.Service,
 	reactionService *reactions.Service,
 	trustService *trust.Service,
+	wikiService *wiki.Service,
 	agentName string,
 ) *ServiceBridge {
 	return &ServiceBridge{
@@ -57,6 +60,7 @@ func NewServiceBridge(
 		searchService:     searchService,
 		reactionService:   reactionService,
 		trustService:      trustService,
+		wikiService:       wikiService,
 		agentName:         agentName,
 	}
 }
@@ -135,6 +139,18 @@ func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[st
 	// --- SQL Query ---
 	case "query":
 		return b.callQuery(ctx, args)
+
+	// --- Wiki ---
+	case "create_article":
+		return b.callCreateArticle(ctx, args)
+	case "get_article":
+		return b.callGetArticle(ctx, args)
+	case "update_article":
+		return b.callUpdateArticle(ctx, args)
+	case "list_articles":
+		return b.callListArticles(ctx, args)
+	case "get_backlinks":
+		return b.callGetBacklinks(ctx, args)
 
 	// --- DM send (also accessible via bridge for execute tool) ---
 	case "send_message":
@@ -1243,6 +1259,155 @@ func (b *ServiceBridge) callQuery(ctx context.Context, args map[string]any) (any
 	}
 
 	return result, nil
+}
+
+// --- Wiki implementations ---
+
+func (b *ServiceBridge) callCreateArticle(ctx context.Context, args map[string]any) (any, error) {
+	if b.wikiService == nil {
+		return nil, fmt.Errorf("wiki not available")
+	}
+
+	slug := getString(args, "slug", "")
+	if slug == "" {
+		return nil, fmt.Errorf("'slug' parameter is required")
+	}
+	title := getString(args, "title", "")
+	if title == "" {
+		return nil, fmt.Errorf("'title' parameter is required")
+	}
+	body := getString(args, "body", "")
+	if body == "" {
+		return nil, fmt.Errorf("'body' parameter is required")
+	}
+
+	article, err := b.wikiService.CreateArticle(ctx, slug, title, body, b.agentName)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"id":        article.ID,
+		"slug":      article.Slug,
+		"title":     article.Title,
+		"revision":  article.Revision,
+		"word_count": article.WordCount,
+		"created_at": article.CreatedAt,
+		"outgoing_links": article.OutgoingLinks,
+	}, nil
+}
+
+func (b *ServiceBridge) callGetArticle(ctx context.Context, args map[string]any) (any, error) {
+	if b.wikiService == nil {
+		return nil, fmt.Errorf("wiki not available")
+	}
+
+	slug := getString(args, "slug", "")
+	if slug == "" {
+		return nil, fmt.Errorf("'slug' parameter is required")
+	}
+
+	article, err := b.wikiService.GetArticle(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]any{
+		"id":             article.ID,
+		"slug":           article.Slug,
+		"title":          article.Title,
+		"body":           article.Body,
+		"created_by":     article.CreatedBy,
+		"updated_by":     article.UpdatedBy,
+		"revision":       article.Revision,
+		"word_count":     article.WordCount,
+		"created_at":     article.CreatedAt,
+		"updated_at":     article.UpdatedAt,
+		"outgoing_links": article.OutgoingLinks,
+		"backlinks":      article.Backlinks,
+	}
+
+	if getBool(args, "include_history", false) {
+		revisions, err := b.wikiService.GetRevisions(ctx, slug)
+		if err != nil {
+			return nil, err
+		}
+		result["revisions"] = revisions
+	}
+
+	return result, nil
+}
+
+func (b *ServiceBridge) callUpdateArticle(ctx context.Context, args map[string]any) (any, error) {
+	if b.wikiService == nil {
+		return nil, fmt.Errorf("wiki not available")
+	}
+
+	slug := getString(args, "slug", "")
+	if slug == "" {
+		return nil, fmt.Errorf("'slug' parameter is required")
+	}
+	body := getString(args, "body", "")
+	if body == "" {
+		return nil, fmt.Errorf("'body' parameter is required")
+	}
+	title := getString(args, "title", "")
+
+	article, err := b.wikiService.UpdateArticle(ctx, slug, title, body, b.agentName)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"id":             article.ID,
+		"slug":           article.Slug,
+		"title":          article.Title,
+		"revision":       article.Revision,
+		"word_count":     article.WordCount,
+		"updated_at":     article.UpdatedAt,
+		"outgoing_links": article.OutgoingLinks,
+	}, nil
+}
+
+func (b *ServiceBridge) callListArticles(ctx context.Context, args map[string]any) (any, error) {
+	if b.wikiService == nil {
+		return nil, fmt.Errorf("wiki not available")
+	}
+
+	query := getString(args, "query", "")
+	limit := getInt(args, "limit", 50)
+
+	articles, err := b.wikiService.ListArticles(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"articles": articles,
+		"count":    len(articles),
+	}, nil
+}
+
+func (b *ServiceBridge) callGetBacklinks(ctx context.Context, args map[string]any) (any, error) {
+	if b.wikiService == nil {
+		return nil, fmt.Errorf("wiki not available")
+	}
+
+	slug := getString(args, "slug", "")
+	if slug == "" {
+		return nil, fmt.Errorf("'slug' parameter is required")
+	}
+
+	backlinks, err := b.wikiService.GetBacklinks(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"slug":      slug,
+		"backlinks": backlinks,
+		"count":     len(backlinks),
+	}, nil
 }
 
 // --- Helpers ---

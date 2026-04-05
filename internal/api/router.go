@@ -18,6 +18,7 @@ import (
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/webhooks"
+	"github.com/synapbus/synapbus/internal/wiki"
 )
 
 // RouterConfig holds optional services for the API router.
@@ -40,6 +41,7 @@ type RouterConfig struct {
 	TrustService      *trust.Service
 	ReactorStore      *reactor.Store
 	ReactorEngine     *reactor.Reactor
+	WikiService       *wiki.Service
 	SSEHub            *SSEHub
 	Broadcaster       *SSEBroadcaster
 	SessionMiddleware func(http.Handler) http.Handler
@@ -262,6 +264,18 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Use(authMiddleware)
 
 			r.Get("/api/trust/{name}", trustHandler.GetScores)
+		})
+	}
+
+	// Wiki
+	if cfg.WikiService != nil {
+		wikiHandler := NewWikiHandler(cfg.WikiService)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+			r.Get("/api/wiki/articles", wikiHandler.ListArticles)
+			r.Get("/api/wiki/articles/{slug}", wikiHandler.GetArticle)
+			r.Get("/api/wiki/articles/{slug}/history", wikiHandler.GetHistory)
+			r.Get("/api/wiki/map", wikiHandler.GetMap)
 		})
 	}
 

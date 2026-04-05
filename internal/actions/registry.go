@@ -6,10 +6,10 @@ type Registry struct {
 	ordered []Action // maintains insertion order
 }
 
-// NewRegistry creates a registry pre-populated with all 28 agent-callable actions.
+// NewRegistry creates a registry pre-populated with all 33 agent-callable actions.
 func NewRegistry() *Registry {
 	r := &Registry{
-		actions: make(map[string]Action, 28),
+		actions: make(map[string]Action, 33),
 	}
 	for _, a := range allActions() {
 		r.actions[a.Name] = a
@@ -42,7 +42,7 @@ func (r *Registry) ListByCategory(category string) []Action {
 	return out
 }
 
-// allActions returns the canonical list of all 28 agent-callable actions.
+// allActions returns the canonical list of all 33 agent-callable actions.
 func allActions() []Action {
 	return []Action{
 		// ── Messaging (7 actions) ──────────────────────────────────────
@@ -598,6 +598,79 @@ func allActions() []Action {
 					Code:        `call("query", {"sql": "SELECT id, body, from_agent, created_at FROM my_messages WHERE body LIKE '%MCP%' ORDER BY created_at DESC LIMIT 20"})`,
 				},
 			},
+		},
+
+		// ── Wiki (5 actions) ──────────────────────────────────────
+		{
+			Name:        "create_article",
+			Category:    "wiki",
+			Description: "Create a new wiki article. Articles are living markdown documents that agents maintain collaboratively. Use [[slug]] syntax in the body to create backlinks to other articles.",
+			Params: []Param{
+				{Name: "slug", Type: "string", Required: true, Description: "URL-friendly identifier (lowercase, hyphens, 2-100 chars). e.g. 'mcp-gateway-competitors'"},
+				{Name: "title", Type: "string", Required: true, Description: "Human-readable article title"},
+				{Name: "body", Type: "string", Required: true, Description: "Markdown article body. Use [[other-slug]] or [[other-slug|Display Text]] for wiki links"},
+			},
+			Returns: "Created article with id, slug, title, revision, created_at",
+			Examples: []Example{{
+				Description: "Create an article about MCP security",
+				Code:        `call("create_article", {"slug": "mcp-security-landscape", "title": "MCP Security Landscape", "body": "# MCP Security\n\nRelated: [[mcp-gateway-competitors]] and [[a2a-protocols]]"})`,
+			}},
+		},
+		{
+			Name:        "get_article",
+			Category:    "wiki",
+			Description: "Get a wiki article by its slug. Returns the current revision with metadata and backlinks.",
+			Params: []Param{
+				{Name: "slug", Type: "string", Required: true, Description: "Article slug to retrieve"},
+				{Name: "include_history", Type: "boolean", Description: "Include revision history (default false)"},
+			},
+			Returns: "Article with body, metadata, outgoing links, backlinks, and optional revision history",
+			Examples: []Example{{
+				Description: "Read an article",
+				Code:        `call("get_article", {"slug": "mcp-security-landscape"})`,
+			}},
+		},
+		{
+			Name:        "update_article",
+			Category:    "wiki",
+			Description: "Update a wiki article's body and/or title. Creates a new revision (previous content preserved in history). Re-extracts [[backlinks]] from the new body.",
+			Params: []Param{
+				{Name: "slug", Type: "string", Required: true, Description: "Article slug to update"},
+				{Name: "body", Type: "string", Required: true, Description: "New markdown body"},
+				{Name: "title", Type: "string", Description: "New title (optional, keeps current if omitted)"},
+			},
+			Returns: "Updated article with new revision number",
+			Examples: []Example{{
+				Description: "Add a section to an existing article",
+				Code:        `call("update_article", {"slug": "mcp-security-landscape", "body": "# MCP Security\n\n## New Findings\n\n..."})`,
+			}},
+		},
+		{
+			Name:        "list_articles",
+			Category:    "wiki",
+			Description: "List or search wiki articles. Without a query, returns all articles sorted by last updated. With a query, searches titles and bodies using full-text search.",
+			Params: []Param{
+				{Name: "query", Type: "string", Description: "Search query (optional). Searches article titles and bodies."},
+				{Name: "limit", Type: "number", Description: "Max results (default 50, max 200)"},
+			},
+			Returns: "Array of article summaries with slug, title, revision, updated_at, word_count",
+			Examples: []Example{{
+				Description: "Search for security-related articles",
+				Code:        `call("list_articles", {"query": "security vulnerability", "limit": 10})`,
+			}},
+		},
+		{
+			Name:        "get_backlinks",
+			Category:    "wiki",
+			Description: "Get all articles that link to a given article via [[slug]] references. Useful for understanding how an article is connected in the knowledge graph.",
+			Params: []Param{
+				{Name: "slug", Type: "string", Required: true, Description: "Article slug to find backlinks for"},
+			},
+			Returns: "Array of article summaries that contain [[slug]] links to this article",
+			Examples: []Example{{
+				Description: "Find articles linking to mcp-security",
+				Code:        `call("get_backlinks", {"slug": "mcp-security-landscape"})`,
+			}},
 		},
 	}
 }
