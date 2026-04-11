@@ -18,6 +18,7 @@ import (
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
 	"github.com/synapbus/synapbus/internal/jsruntime"
+	"github.com/synapbus/synapbus/internal/marketplace"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
@@ -209,6 +210,14 @@ func NewMCPServer(
 func (s *MCPServer) SetQueryExecutor(exec *agentquery.Executor) {
 	if s.hybridRegistrar != nil {
 		s.hybridRegistrar.SetQueryExecutor(exec)
+	}
+}
+
+// SetMarketplaceService wires the marketplace service (spec 016) into the
+// hybrid tool registrar so execute-tool calls can reach marketplace actions.
+func (s *MCPServer) SetMarketplaceService(m *marketplace.Service) {
+	if s.hybridRegistrar != nil {
+		s.hybridRegistrar.SetMarketplaceService(m)
 	}
 }
 

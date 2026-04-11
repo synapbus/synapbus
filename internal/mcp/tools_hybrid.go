@@ -18,6 +18,7 @@ import (
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/jsruntime"
 	"github.com/synapbus/synapbus/internal/agentquery"
+	"github.com/synapbus/synapbus/internal/marketplace"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
@@ -36,12 +37,20 @@ type HybridToolRegistrar struct {
 	reactionService   *reactions.Service
 	trustService      *trust.Service
 	wikiService       *wiki.Service
+	marketplaceSvc    *marketplace.Service
 	jsPool            *jsruntime.Pool
 	actionRegistry    *actions.Registry
 	actionIndex       *actions.Index
 	db                *sql.DB
 	queryExecutor     *agentquery.Executor
 	logger            *slog.Logger
+}
+
+// SetMarketplaceService attaches the marketplace service for the 5 new
+// spec-016 actions (post_auction, bid, award, read_skill_card, query_reputation).
+// Call this after NewHybridToolRegistrar.
+func (h *HybridToolRegistrar) SetMarketplaceService(m *marketplace.Service) {
+	h.marketplaceSvc = m
 }
 
 // SetQueryExecutor sets the SQL query executor for all agent bridges.
@@ -509,6 +518,9 @@ func (h *HybridToolRegistrar) handleExecute(ctx context.Context, req mcplib.Call
 	)
 	if h.queryExecutor != nil {
 		bridge.SetQueryExecutor(h.queryExecutor)
+	}
+	if h.marketplaceSvc != nil {
+		bridge.attachMarketplace(h.marketplaceSvc)
 	}
 
 	result, err := h.jsPool.Execute(ctx, code, bridge, jsruntime.ExecuteOptions{

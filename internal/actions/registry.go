@@ -6,10 +6,12 @@ type Registry struct {
 	ordered []Action // maintains insertion order
 }
 
-// NewRegistry creates a registry pre-populated with all 33 agent-callable actions.
+// NewRegistry creates a registry pre-populated with the full set of
+// agent-callable actions (marketplace additions in spec 016 bring the
+// total to ~39).
 func NewRegistry() *Registry {
 	r := &Registry{
-		actions: make(map[string]Action, 33),
+		actions: make(map[string]Action, 40),
 	}
 	for _, a := range allActions() {
 		r.actions[a.Name] = a
@@ -670,6 +672,103 @@ func allActions() []Action {
 			Examples: []Example{{
 				Description: "Find articles linking to mcp-security",
 				Code:        `call("get_backlinks", {"slug": "mcp-security-landscape"})`,
+			}},
+		},
+
+		// ── Marketplace (6 actions) — spec 016 ──────────────────────
+		{
+			Name:     "post_auction",
+			Category: "marketplace",
+			Description: "Post an auction task to an auction-type channel (spec 016 / US1). Agents bid on the task and the poster awards one bid. Include max_budget_tokens and at least one domain tag so reputation can be scoped when the task completes.",
+			Params: []Param{
+				{Name: "channel_name", Type: "string", Required: true, Description: "Name of the auction channel"},
+				{Name: "title", Type: "string", Required: true, Description: "Short task title"},
+				{Name: "description", Type: "string", Description: "Task description"},
+				{Name: "acceptance_criteria", Type: "string", Description: "What success looks like"},
+				{Name: "max_budget_tokens", Type: "number", Description: "Maximum token budget for the winning agent"},
+				{Name: "domains", Type: "string", Description: "Comma-separated domain tags (e.g. 'data-analysis,python') or JSON array"},
+				{Name: "difficulty_weight", Type: "number", Description: "Difficulty multiplier for reputation scoring (default 1.0)"},
+				{Name: "deadline", Type: "string", Description: "ISO 8601 deadline"},
+			},
+			Returns: "JSON with task_id, channel_id, title, status, domains, max_budget_tokens, deadline",
+			Examples: []Example{{
+				Description: "Post an auction for a data analysis task",
+				Code:        `call("post_auction", {"channel_name": "task-marketplace", "title": "Q4 revenue analysis", "description": "Trend analysis with charts", "domains": "data-analysis,python", "max_budget_tokens": 8000, "deadline": "2026-05-01T17:00:00Z"})`,
+			}},
+		},
+		{
+			Name:     "bid",
+			Category: "marketplace",
+			Description: "Submit a bid on an auction task (spec 016 / US1). Include estimated_tokens, a confidence score in [0,1], a brief approach summary, and the revision of your capability manifest at time of bid.",
+			Params: []Param{
+				{Name: "task_id", Type: "number", Required: true, Description: "ID of the auction task"},
+				{Name: "estimated_tokens", Type: "number", Description: "Your estimated token cost to complete the task"},
+				{Name: "confidence", Type: "number", Description: "Self-reported confidence in 0.0..1.0"},
+				{Name: "approach", Type: "string", Description: "Brief approach summary"},
+				{Name: "manifest_revision", Type: "number", Description: "Revision of your capability manifest at time of bid"},
+				{Name: "time_estimate", Type: "string", Description: "Optional human-readable time estimate"},
+			},
+			Returns: "JSON with bid_id, task_id, agent_name, status, estimated_tokens, confidence",
+			Examples: []Example{{
+				Description: "Bid on task 42 with an 8k token estimate",
+				Code:        `call("bid", {"task_id": 42, "estimated_tokens": 4200, "confidence": 0.9, "approach": "Pandas + matplotlib"})`,
+			}},
+		},
+		{
+			Name:     "award",
+			Category: "marketplace",
+			Description: "Award an auction task to a specific bid (spec 016 / US1). Only the task poster can award. On award, the winning agent receives a high-priority DM they can process via the normal claim/process/done lifecycle.",
+			Params: []Param{
+				{Name: "task_id", Type: "number", Required: true, Description: "ID of the task"},
+				{Name: "bid_id", Type: "number", Required: true, Description: "ID of the winning bid"},
+			},
+			Returns: "JSON with task_id, bid_id, winner, claim_message_id, status",
+			Examples: []Example{{
+				Description: "Award task 42 to bid 7",
+				Code:        `call("award", {"task_id": 42, "bid_id": 7})`,
+			}},
+		},
+		{
+			Name:     "mark_task_done",
+			Category: "marketplace",
+			Description: "Mark an auction task done (spec 016 / US3). Only the assigned agent can call this. Records reputation ledger entries for each declared domain using the reported actual_tokens and success_score.",
+			Params: []Param{
+				{Name: "task_id", Type: "number", Required: true, Description: "ID of the assigned task"},
+				{Name: "actual_tokens", Type: "number", Description: "Actual tokens spent"},
+				{Name: "success_score", Type: "number", Description: "Self-reported success score in 0.0..1.0 (default 1.0)"},
+			},
+			Returns: "JSON with task_id, status, actual_tokens, success_score, reputation_entries",
+			Examples: []Example{{
+				Description: "Mark task 42 completed with 3800 tokens spent",
+				Code:        `call("mark_task_done", {"task_id": 42, "actual_tokens": 3800, "success_score": 1.0})`,
+			}},
+		},
+		{
+			Name:     "read_skill_card",
+			Category: "marketplace",
+			Description: "Read an agent's capability manifest (spec 016 / US2). Capability manifests are versioned wiki articles at slug 'agent-<name>'. Returns exists=false if the agent has not published a manifest yet. Use create_article / update_article on slug 'agent-<your-name>' to publish or update your own.",
+			Params: []Param{
+				{Name: "agent_name", Type: "string", Description: "Name of the agent whose manifest you want to read (defaults to caller)"},
+			},
+			Returns: "JSON with agent_name, exists, slug, title, body, revision, updated_at",
+			Examples: []Example{{
+				Description: "Read another agent's skill card",
+				Code:        `call("read_skill_card", {"agent_name": "data-processor"})`,
+			}},
+		},
+		{
+			Name:     "query_reputation",
+			Category: "marketplace",
+			Description: "Query the per-(agent, domain) reputation ledger (spec 016 / US3). Reputation is a vector — you must supply both agent and domain. Returns an aggregated summary and the most recent raw ledger entries.",
+			Params: []Param{
+				{Name: "agent_name", Type: "string", Description: "Agent to query (defaults to caller)"},
+				{Name: "domain", Type: "string", Required: true, Description: "Domain tag to scope the query"},
+				{Name: "limit", Type: "number", Description: "Max raw entries to return (default 20)"},
+			},
+			Returns: "JSON with agent_name, domain, summary (tasks_completed, avg_success_score, weighted_success_score, avg_estimated_tokens, avg_actual_tokens), recent_entries",
+			Examples: []Example{{
+				Description: "Check an agent's reputation in data-analysis",
+				Code:        `call("query_reputation", {"agent_name": "data-processor", "domain": "data-analysis"})`,
 			}},
 		},
 	}

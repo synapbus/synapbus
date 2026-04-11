@@ -4,11 +4,12 @@ import (
 	"testing"
 )
 
-func TestRegistryHas35Actions(t *testing.T) {
+func TestRegistryHasAllActions(t *testing.T) {
 	r := NewRegistry()
 	got := len(r.List())
-	if got != 35 {
-		t.Errorf("expected 35 actions, got %d", got)
+	const want = 41 // 35 original + 6 marketplace (spec 016)
+	if got != want {
+		t.Errorf("expected %d actions, got %d", want, got)
 	}
 }
 
@@ -28,6 +29,7 @@ func TestRegistryCategories(t *testing.T) {
 		{"trust", 1},
 		{"data", 1},
 		{"wiki", 5},
+		{"marketplace", 6},
 	}
 
 	for _, tt := range tests {
@@ -64,6 +66,8 @@ func TestRegistryGetByName(t *testing.T) {
 		"query",
 		// wiki
 		"create_article", "get_article", "update_article", "list_articles", "get_backlinks",
+		// marketplace (spec 016)
+		"post_auction", "bid", "award", "mark_task_done", "read_skill_card", "query_reputation",
 	}
 
 	for _, name := range allNames {

@@ -15,6 +15,7 @@ import (
 	"github.com/synapbus/synapbus/internal/agentquery"
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/marketplace"
 	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
@@ -34,6 +35,7 @@ type ServiceBridge struct {
 	reactionService   *reactions.Service
 	trustService      *trust.Service
 	wikiService       *wiki.Service
+	marketplace       *marketplace.Service
 	queryExecutor     *agentquery.Executor
 	agentName         string
 }
@@ -155,6 +157,20 @@ func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[st
 	// --- DM send (also accessible via bridge for execute tool) ---
 	case "send_message":
 		return b.callSendMessage(ctx, args)
+
+	// --- Marketplace (spec 016) ---
+	case "post_auction":
+		return b.callPostAuction(ctx, args)
+	case "bid":
+		return b.callBid(ctx, args)
+	case "award":
+		return b.callAward(ctx, args)
+	case "mark_task_done":
+		return b.callMarkTaskDone(ctx, args)
+	case "read_skill_card":
+		return b.callReadSkillCard(ctx, args)
+	case "query_reputation":
+		return b.callQueryReputation(ctx, args)
 
 	default:
 		return nil, fmt.Errorf("unknown action: %s", actionName)

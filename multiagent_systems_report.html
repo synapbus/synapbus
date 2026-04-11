@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent Orchestration — Landscape &amp; Benchmarks (April 2026)</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #131722;
+    --panel-2: #1a2030;
+    --ink: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #7cc4ff;
+    --accent-2: #b49bff;
+    --good: #6ddf9c;
+    --warn: #ffb86b;
+    --bad: #ff7a7a;
+    --border: #242b3d;
+    --code-bg: #0f1320;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    font-size: 16px; line-height: 1.6; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted rgba(124,196,255,0.35); }
+  a:hover { color: #b0dcff; border-bottom-color: var(--accent); }
+  code, pre { font-family: "JetBrains Mono", "Fira Code", Menlo, monospace; font-size: 0.92em; }
+  code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); }
+
+  header {
+    padding: 64px 32px 48px; text-align: center;
+    background: radial-gradient(ellipse at top, rgba(124,196,255,0.15), transparent 60%),
+                radial-gradient(ellipse at bottom right, rgba(180,155,255,0.1), transparent 55%);
+    border-bottom: 1px solid var(--border);
+  }
+  header .kicker { color: var(--accent-2); font-size: 0.85rem; letter-spacing: 0.18em;
+    text-transform: uppercase; font-weight: 600; }
+  header h1 { font-size: 2.6rem; margin: 12px 0 8px; letter-spacing: -0.02em; }
+  header p.sub { color: var(--muted); max-width: 720px; margin: 8px auto 0; font-size: 1.05rem; }
+  header .meta { margin-top: 20px; color: var(--muted); font-size: 0.85rem; }
+  header .meta span { display: inline-block; margin: 0 10px; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 40px 32px 80px; }
+  section { margin-bottom: 72px; }
+  section > h2 { font-size: 1.85rem; margin: 0 0 6px; letter-spacing: -0.01em;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent; background-clip: text; }
+  section > h2 + p.lede { color: var(--muted); margin: 0 0 28px; max-width: 820px; }
+
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 28px; margin-bottom: 48px; }
+  .toc h3 { margin: 0 0 12px; font-size: 0.85rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted); }
+  .toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  .toc ol li { margin: 4px 0; }
+
+  .grid {
+    display: grid; gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px 24px; display: flex; flex-direction: column;
+    transition: border-color 0.18s, transform 0.18s;
+  }
+  .card:hover { border-color: #3a4668; transform: translateY(-2px); }
+  .card h3 { margin: 0 0 4px; font-size: 1.2rem; display: flex; align-items: center; gap: 10px; }
+  .card .repo { font-size: 0.82rem; color: var(--muted); word-break: break-all; margin-bottom: 10px; }
+  .card .desc { color: var(--ink); margin: 0 0 14px; font-size: 0.95rem; }
+  .card ul { margin: 0 0 14px; padding-left: 18px; color: #cbd2e0; font-size: 0.9rem; }
+  .card ul li { margin: 3px 0; }
+  .card .footer { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px;
+    border-top: 1px dashed var(--border); }
+  .chip { display: inline-block; padding: 3px 9px; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 500; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); }
+  .chip.stars { color: var(--warn); border-color: rgba(255,184,107,0.3); }
+  .chip.lang { color: var(--accent); border-color: rgba(124,196,255,0.3); }
+  .chip.lic { color: var(--good); border-color: rgba(109,223,156,0.3); }
+  .chip.status-active { color: var(--good); border-color: rgba(109,223,156,0.3); }
+  .chip.status-maint { color: var(--warn); border-color: rgba(255,184,107,0.3); }
+  .chip.status-dead { color: var(--bad); border-color: rgba(255,122,122,0.3); }
+
+  .problem-list { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+  .problem {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .problem h3 { margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }
+  .problem p { margin: 6px 0; font-size: 0.93rem; color: #cbd2e0; }
+  .problem .ex { font-size: 0.83rem; color: var(--muted); font-style: italic; }
+
+  .toys { display: grid; gap: 20px; }
+  .toy {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px 26px; display: grid; gap: 12px;
+    grid-template-columns: 40px 1fr; align-items: start;
+  }
+  .toy .num { font-family: "JetBrains Mono", monospace; font-size: 1.6rem;
+    color: var(--accent-2); line-height: 1; padding-top: 2px; }
+  .toy h3 { margin: 0 0 8px; font-size: 1.15rem; }
+  .toy .tests { display: inline-block; font-size: 0.72rem; padding: 2px 8px;
+    border-radius: 4px; background: rgba(124,196,255,0.1); color: var(--accent);
+    border: 1px solid rgba(124,196,255,0.25); margin-bottom: 10px; }
+  .toy dl { margin: 6px 0 0; display: grid; grid-template-columns: 110px 1fr; gap: 4px 16px; font-size: 0.9rem; }
+  .toy dt { color: var(--muted); }
+  .toy dd { margin: 0; color: #cbd2e0; }
+
+  .callout {
+    border-left: 3px solid var(--accent-2); padding: 14px 20px;
+    background: rgba(180,155,255,0.06); border-radius: 0 8px 8px 0;
+    margin: 24px 0; color: #d6dbea;
+  }
+  .callout strong { color: var(--accent-2); }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 24px; }
+  .pill-row .chip { font-size: 0.78rem; padding: 4px 12px; }
+
+  footer { border-top: 1px solid var(--border); padding: 32px; text-align: center;
+    color: var(--muted); font-size: 0.85rem; }
+  footer code { color: var(--accent); }
+
+  /* Patterns / quotations / citations */
+  blockquote {
+    margin: 14px 0; padding: 14px 18px 14px 22px;
+    border-left: 3px solid var(--accent);
+    background: linear-gradient(90deg, rgba(124,196,255,0.07), transparent 90%);
+    border-radius: 0 8px 8px 0;
+    color: #d6dbea; font-size: 0.93rem; font-style: italic;
+  }
+  blockquote cite { display: block; margin-top: 8px; font-style: normal;
+    font-size: 0.8rem; color: var(--muted); }
+  blockquote cite::before { content: "— "; }
+
+  .pattern {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px 26px; margin-bottom: 18px;
+  }
+  .pattern h3 { margin: 0 0 4px; font-size: 1.15rem; color: var(--accent-2); }
+  .pattern .origin { font-size: 0.78rem; color: var(--muted); margin-bottom: 10px; letter-spacing: 0.02em; }
+  .pattern p { margin: 8px 0; font-size: 0.93rem; }
+  .pattern .llm-map { color: #cbd2e0; font-size: 0.9rem; }
+  .pattern .llm-map strong { color: var(--accent); }
+
+  .spectrum-table {
+    width: 100%; border-collapse: collapse; margin: 18px 0 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  .spectrum-table th, .spectrum-table td {
+    padding: 11px 16px; text-align: left; font-size: 0.9rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .spectrum-table th { background: var(--panel-2); color: var(--accent-2);
+    font-weight: 600; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+  .spectrum-table tr:last-child td { border-bottom: none; }
+  .spectrum-table td:first-child { color: var(--ink); font-weight: 500; }
+
+  .primitive-list {
+    display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    margin: 16px 0 0;
+  }
+  .primitive {
+    padding: 12px 16px; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; font-size: 0.88rem;
+  }
+  .primitive strong { color: var(--accent); display: block; margin-bottom: 2px; }
+  .primitive .have { color: var(--good); font-size: 0.72rem; float: right; }
+  .primitive .miss { color: var(--warn); font-size: 0.72rem; float: right; }
+
+  .refs { margin-top: 22px; font-size: 0.85rem; }
+  .refs h4 { margin: 0 0 8px; color: var(--muted); font-size: 0.78rem;
+    text-transform: uppercase; letter-spacing: 0.12em; }
+  .refs ul { margin: 0; padding-left: 18px; color: #cbd2e0; }
+  .refs ul li { margin: 4px 0; }
+
+  @media (max-width: 760px) {
+    header h1 { font-size: 1.9rem; }
+    main { padding: 24px 18px 60px; }
+    .toc ol { columns: 1; }
+    .toy { grid-template-columns: 1fr; }
+    .toy dl { grid-template-columns: 90px 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="kicker">Deep Research Report · SynapBus</div>
+  <h1>Multi-Agent Orchestration</h1>
+  <p class="sub">A landscape of the open-source frameworks that coordinate AI agents at scale, the problem classes where they earn their keep, and concrete toy benchmarks to stress-test any multi-agent system.</p>
+  <div class="meta">
+    <span>Compiled 2026-04-10</span>·<span>Sources: live web research + SynapBus data</span>·<span>Audience: infra engineers</span>
+  </div>
+</header>
+
+<main>
+
+  <nav class="toc">
+    <h3>Contents</h3>
+    <ol>
+      <li><a href="#patterns">Coordination patterns &amp; self-organization</a></li>
+      <li><a href="#landscape">Open-source orchestration frameworks</a></li>
+      <li><a href="#consolidation">2026 consolidation notes</a></li>
+      <li><a href="#problems">What problems do MAS solve?</a></li>
+      <li><a href="#toys">Toy problems for benchmarking</a></li>
+      <li><a href="#recommendation">Recommendation for SynapBus</a></li>
+    </ol>
+  </nav>
+
+  <section id="patterns">
+    <h2>1. Coordination patterns &amp; self-organization</h2>
+    <p class="lede">Frameworks come and go; coordination patterns are eternal. The real question for a substrate like SynapBus isn't <em>which framework</em> — it's <em>which primitives must the substrate expose so agents can self-organize without being told how</em>. The last two years of research converge on a clear answer: give frontier-capable agents the minimum scaffolding they need, and they out-perform hand-designed hierarchies.</p>
+
+    <h3 style="color:var(--accent); margin-top:28px;">1.1 The rigid → emergent spectrum</h3>
+    <p>Real 2025–2026 systems cluster along a spectrum, not at either pole. At the <strong>rigid</strong> end: LangGraph DAGs, CrewAI hierarchies, AutoGen supervisor patterns — fixed roles, predetermined edges, a central orchestrator as bottleneck. At the <strong>emergent</strong> end: OASIS million-agent simulations, digital-pheromone pressure fields, pure swarms where global behavior falls out of local rules.</p>
+
+    <blockquote>
+      The most important finding of the last year is the <strong>endogeneity paradox</strong>: neither maximal control nor maximal autonomy wins. A hybrid "Sequential" protocol providing only fixed turn-ordering as scaffolding but allowing fully endogenous role specialization beats centralized coordination by 14% (p&lt;0.001). Given just turn ordering, 8 agents spontaneously invented <strong>5,006 unique roles</strong>, voluntarily abstained from tasks outside their competence, and formed shallow hierarchies. No quality degradation up to 256 agents.
+      <cite>Dochkina (2025), "Drop the Hierarchy and Roles", 25,000 tasks across 8 models</cite>
+    </blockquote>
+
+    <p>There's a <strong>capability threshold</strong>: frontier models self-organize well; weaker models still benefit from rigid structure. The tradeoff matrix:</p>
+
+    <table class="spectrum-table">
+      <thead>
+        <tr><th>Dimension</th><th>Rigid wins</th><th>Emergent wins</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Debuggability</td><td>strong</td><td>weak (non-reproducible)</td></tr>
+        <tr><td>Predictability / SLA</td><td>strong</td><td>weak</td></tr>
+        <tr><td>Adaptability to novel goals</td><td>weak</td><td>strong</td></tr>
+        <tr><td>Scaling to many agents</td><td>bottlenecks</td><td>graceful</td></tr>
+        <tr><td>Cost / tokens</td><td>high orchestration overhead</td><td>lower (agents self-trim)</td></tr>
+        <tr><td>Failure modes</td><td>cascading role-failure</td><td>silent stalemate, drift</td></tr>
+        <tr><td>Compliance / audit</td><td>easy</td><td>hard</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="color:var(--accent); margin-top:36px;">1.2 Classical self-organization patterns</h3>
+    <p>Six patterns from the pre-LLM era that all have 2025 operationalizations for language agents.</p>
+
+    <div class="pattern">
+      <h3>Blackboard systems</h3>
+      <div class="origin">Hearsay-II · Erman &amp; Lesser 1975 · Corkill 1991</div>
+      <p>A shared, structured knowledge store. Independent "knowledge sources" watch it, and when their precondition pattern matches the current state, they fire and contribute. No central scheduler chooses who speaks next — the blackboard's <em>current contents</em> do.</p>
+      <p class="llm-map"><strong>LLM mapping:</strong> Two 2025 papers reimplement exactly this pattern for LLMs. Agents "volunteer" when the current state matches their capability.</p>
+      <blockquote>
+        13–57% end-to-end improvement over static and dynamic baselines, with <em>lower token cost</em> because agents sit out when they have nothing to add.
+        <cite><a href="https://arxiv.org/abs/2507.01701">Exploring Advanced LLM Multi-Agent Systems Based on Blackboard Architecture</a> (2025) · <a href="https://arxiv.org/abs/2510.01285">LLM-Based Multi-Agent Blackboard System for Information Discovery in Data Science</a> (2025)</cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Stigmergy</h3>
+      <div class="origin">Grassé 1959 (termite mounds) · Dorigo ACO 1992</div>
+      <p>Agents don't talk to each other; they <em>modify the environment</em>, and others react to the modified environment. Ants leave pheromone trails; termites deposit pellets whose shape triggers the next placement. Indirect, asynchronous, tolerant of agent death.</p>
+      <p class="llm-map"><strong>LLM mapping:</strong> CodeCRDT treats a code artifact as the shared environment — agents read "quality pressure" from the artifact and act to reduce badness.</p>
+      <blockquote>
+        600-trial evaluation: <strong>up to 21.1% speedup when task locality holds, up to 39.4% slowdown when coupling is high</strong>. The critical heuristic: stigmergy wins when locality holds; explicit coordination wins when work is tightly coupled.
+        <cite><a href="https://arxiv.org/abs/2510.18893">CodeCRDT: Observation-Driven Coordination for Multi-Agent LLM Code Generation</a> (Oct 2025)</cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Contract Net Protocol</h3>
+      <div class="origin">Reid Smith · IEEE Transactions on Computers 1980</div>
+      <p>A manager broadcasts a task; capable contractors bid; the manager awards. No central allocator knows who can do what in advance. The original distributed task-allocation protocol, still unbeaten for ambiguous decomposition.</p>
+      <p class="llm-map"><strong>LLM mapping:</strong> Resource-bounded CNP for LLM agents with structured bidding. Reports 90% token reduction and 525× lower variance vs orchestrated workflows on matched tasks.</p>
+    </div>
+
+    <div class="pattern">
+      <h3>Flocking / Boids</h3>
+      <div class="origin">Craig Reynolds · SIGGRAPH 1987</div>
+      <p>Three local rules — separation, alignment, cohesion — produce global flocking. No leader, no plan, no global state. The canonical demonstration that complex group behavior emerges from simple local interactions.</p>
+      <p class="llm-map"><strong>LLM mapping:</strong> Underexplored. Prompt-level "look at what peers are doing, stay close but not too close" patterns map directly. Relevant to reactive-agent triggers that fan out and converge without central direction.</p>
+    </div>
+
+    <div class="pattern">
+      <h3>Gossip / epidemic protocols</h3>
+      <div class="origin">Demers et al. · PODC 1987</div>
+      <p>Each node periodically shares state with a random peer; information spreads epidemically. No routing, no topology maintenance, graceful under node churn. The coordination substrate of real-world distributed databases (Cassandra, DynamoDB).</p>
+      <p class="llm-map"><strong>LLM mapping:</strong> Gossip is argued as <em>the missing layer</em> for context-rich adaptive agent communication — as opposed to structured protocols that only do reliable task delegation.</p>
+      <blockquote>
+        Gossip enables indirect reciprocity and cooperation emergence among self-interested LLMs — a property structured protocols cannot produce.
+        <cite><a href="https://arxiv.org/abs/2508.01531">Revisiting Gossip Protocols: A Vision for Emergent Coordination in Agentic MAS</a> (Aug 2025)</cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Pheromone trails / pressure fields</h3>
+      <div class="origin">Dorigo ACO 1992 · MIT Ripple Effect Protocol 2025</div>
+      <p>Persistent, decaying environmental marks. Three key properties: <em>decay</em> (stale info fades), <em>reinforcement</em> (reuse strengthens), <em>locality</em> (nearby beats far).</p>
+      <p class="llm-map"><strong>LLM mapping:</strong> Pressure-field coordination — agents coordinate via a shared vector field with temporal decay, no conversation at all. The Ripple Effect Protocol adds <em>sensitivity signals</em> — agents share not just decisions but how decisions would change if environment shifted.</p>
+      <blockquote>
+        4× solve rate vs conversation-based and 30× vs hierarchical on scheduling tasks. Ripple Effect sensitivity signals report 41–100% improvement over A2A communication.
+        <cite><a href="https://iceberg.mit.edu/protocol.pdf">Ripple Effect Protocol</a> (MIT 2025) · <a href="https://arxiv.org/abs/2202.09722">PooL: Pheromone-inspired MARL</a></cite>
+      </blockquote>
+    </div>
+
+    <h3 style="color:var(--accent); margin-top:36px;">1.3 Modern LLM-era patterns (2023–2026)</h3>
+
+    <div class="pattern">
+      <h3>Emergent role allocation</h3>
+      <div class="origin">CAMEL 2023 · Generative Agents 2023 · Dochkina 2025</div>
+      <p>Instead of hand-assigning "researcher" and "reviewer", agents <em>negotiate</em> roles via inception prompts, personas, and metacognition. Frontier models produce stable role differentiation from minimal scaffolding.</p>
+      <blockquote>
+        Bare groups show temporal synergy but no coordinated alignment. Add <em>personas</em> → stable identity-linked differentiation. Add personas + <em>metacognitive prompts</em> ("think about what other agents might do") → goal-directed complementarity.
+        <cite><a href="https://arxiv.org/abs/2510.05174">Emergent Coordination in Multi-Agent Language Models</a> (Riedl 2025) · <a href="https://arxiv.org/abs/2303.17760">CAMEL: Communicative Agents for "Mind" Exploration</a> · <a href="https://arxiv.org/abs/2304.03442">Generative Agents: Interactive Simulacra of Human Behavior</a> (Park et al., UIST 2023)</cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Mixture-of-Agents (MoA)</h3>
+      <div class="origin">Together AI · 2024</div>
+      <p>Layered architecture: proposers → aggregators → more proposers → final aggregator. Each layer sees all previous outputs. Identifies "the collaborativeness of LLMs" — models improve when shown peer outputs, even from weaker peers.</p>
+      <blockquote>
+        65.1% on AlpacaEval 2.0 using only open-source models vs 57.5% for GPT-4o. A stack of smaller models self-organized into layers beats a single frontier model.
+        <cite><a href="https://arxiv.org/abs/2406.04692">Mixture-of-Agents Enhances Large Language Model Capabilities</a> (Wang et al., 2024)</cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Multi-agent debate (with skepticism)</h3>
+      <div class="origin">ChatEval 2024 · Society of Minds 2023</div>
+      <p>Agents with diverse personas debate to reach consensus. Intuitive, but the 2025 literature is increasingly skeptical.</p>
+      <blockquote>
+        Multi-agent debate frequently fails to beat a well-prompted single agent, even with more compute. Relaxing the consensus requirement (FREE-MAD) tends to improve quality — a general insight: <em>don't force convergence</em>.
+        <cite><a href="https://arxiv.org/abs/2308.07201">ChatEval</a> (ICLR 2024) · <a href="https://arxiv.org/pdf/2502.08788">Stop Overvaluing Multi-Agent Debate</a> (2025) · <a href="https://arxiv.org/pdf/2509.11035">FREE-MAD</a> (2025)</cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Million-agent social simulations</h3>
+      <div class="origin">OASIS · Nov 2024</div>
+      <p>Runs up to 1M LLM agents on X/Reddit-shaped environments with 21 action types. Replicates information spreading, polarization, and herd behavior.</p>
+      <blockquote>
+        Larger populations produce <em>more diverse and more useful opinions</em>. Population size itself is a coordination resource.
+        <cite><a href="https://arxiv.org/abs/2411.11581">OASIS: Open Agent Social Interaction Simulations with One Million Agents</a> · <a href="https://oasis.camel-ai.org/">oasis.camel-ai.org</a></cite>
+      </blockquote>
+    </div>
+
+    <div class="pattern">
+      <h3>Self-organizing research pipelines</h3>
+      <div class="origin">AgentRxiv · Sakana AI Scientist · Google AI Co-Scientist</div>
+      <p>Multiple parallel labs share a preprint server; each lab reads and builds on others. This is <em>stigmergy applied to research</em> — the shared preprint archive is the coordination substrate.</p>
+      <blockquote>
+        Agent Laboratory + AgentRxiv: 3 parallel labs sharing a preprint server. MATH-500 rises from 70.2% → 79.8% purely through asynchronous cross-lab exchange.
+        <cite><a href="https://agentrxiv.github.io/">AgentRxiv: Collaborative Autonomous Research</a> · <a href="https://sakana.ai/ai-scientist/">Sakana AI Scientist</a> · <a href="https://research.google/blog/accelerating-scientific-breakthroughs-with-an-ai-co-scientist/">Google AI Co-Scientist</a></cite>
+      </blockquote>
+    </div>
+
+    <h3 style="color:var(--accent); margin-top:36px;">1.4 When to predefine vs let emerge</h3>
+    <p>A concrete heuristic for the engineer:</p>
+    <div class="callout">
+      <strong>Use rigid structure when:</strong> SLAs / compliance / audit are hard requirements; tasks are tightly coupled (CodeCRDT shows locality failing); agents are below the capability threshold; failure must be reproducible; retries are expensive.
+    </div>
+    <div class="callout">
+      <strong>Use emergent when:</strong> task is exploratory or novel; goal space is open; agents are frontier-capable (Claude Opus / GPT-4-class and up); task decomposes locally; diversity of approach is itself valuable; population is large enough that drop-outs don't break the system.
+    </div>
+    <div class="callout">
+      <strong>Hybrid recipe (recommended default for SynapBus):</strong> provide a <em>blackboard-like substrate</em> (channels, threads, wiki, shared mutable memory). Add <em>minimal scaffolding</em> (turn ordering, claim-process-done, priority numbers). Expose <em>environmental signals</em> (reactions, decay, reply counts, workflow state). Let roles be <em>endogenous</em> — negotiate via personas, don't hard-code. Keep a <em>human-owner trace</em> for every action.
+    </div>
+    <blockquote style="font-size:1.05rem; padding:18px 24px;">
+      Give them a blackboard and the minimum ordering they need, then get out of the way.
+      <cite>The SynapBus design slogan</cite>
+    </blockquote>
+
+    <h3 style="color:var(--accent); margin-top:36px;">1.5 Primitive catalog — what a self-organizing substrate must expose</h3>
+    <p>Twelve coordination primitives that a messaging-hub-style system needs to enable self-organization without enforcing structure. Annotated with what SynapBus already has vs what's missing.</p>
+
+    <div class="primitive-list">
+      <div class="primitive"><strong>Broadcast channels<span class="have">✓ have</span></strong>Pattern-match-and-fire substrate — the classic blackboard.</div>
+      <div class="primitive"><strong>Claim/process/done lifecycle<span class="have">✓ have</span></strong>Contract-net without explicit bidding. Already in SynapBus.</div>
+      <div class="primitive"><strong>Threaded replies<span class="have">✓ have</span></strong>Conversational locality — debate without full broadcast.</div>
+      <div class="primitive"><strong>Semantic reactions<span class="have">✓ have</span></strong>approve/reject/in_progress/done — cheap signaling, drives workflow state.</div>
+      <div class="primitive"><strong>Shared mutable memory (wiki)<span class="have">✓ have</span></strong>Durable blackboard layer; cross-linked articles act as stigmergic trails.</div>
+      <div class="primitive"><strong>Reactive triggers<span class="have">✓ have</span></strong>"When pattern X in channel Y, run agent Z" — ant-colony-style reaction.</div>
+      <div class="primitive"><strong>Semantic search over history<span class="have">✓ have</span></strong>Gossip-equivalent: discover any output by query, not by routing.</div>
+      <div class="primitive"><strong>Activity traces / workflow state<span class="have">✓ have</span></strong>Observability <em>is</em> coordination — agents orient without being told.</div>
+      <div class="primitive"><strong>Decaying pheromone signals<span class="miss">◇ missing</span></strong>Channel "heat" with temporal decay; recent activity attracts attention.</div>
+      <div class="primitive"><strong>Reputation aggregates<span class="miss">◇ missing</span></strong>Visible reaction scores over time → indirect reciprocity.</div>
+      <div class="primitive"><strong>Auction / bid channels<span class="miss">◇ missing</span></strong>Explicit CNP for ambiguous decomposition: post task, agents bid.</div>
+      <div class="primitive"><strong>Pressure / sensitivity fields<span class="miss">◇ missing</span></strong>Shared vector field — agents act on gradients, not messages.</div>
+    </div>
+
+    <div class="refs">
+      <h4>Key references for §1</h4>
+      <ul>
+        <li><a href="https://arxiv.org/abs/2510.05174">Emergent Coordination in Multi-Agent Language Models</a> — Riedl 2025. Information-theoretic measurement; persona + metacognition recipe.</li>
+        <li><a href="https://arxiv.org/abs/2507.01701">Exploring Advanced LLM Multi-Agent Systems Based on Blackboard Architecture</a> — 2025. First LLM-era blackboard.</li>
+        <li><a href="https://arxiv.org/abs/2510.01285">LLM-Based Multi-Agent Blackboard System for Information Discovery</a> — 2025. Real-world results.</li>
+        <li><a href="https://arxiv.org/abs/2510.18893">CodeCRDT: Observation-Driven Coordination</a> — Oct 2025. Stigmergy in practice + locality-vs-coupling heuristic.</li>
+        <li><a href="https://arxiv.org/abs/2406.04692">Mixture-of-Agents Enhances LLM Capabilities</a> — Wang et al. 2024.</li>
+        <li><a href="https://arxiv.org/abs/2411.11581">OASIS: One Million Agents</a> — Yang et al. Nov 2024.</li>
+        <li><a href="https://arxiv.org/abs/2304.03442">Generative Agents</a> — Park et al. UIST 2023. Foundational emergence demo.</li>
+        <li><a href="https://arxiv.org/abs/2303.17760">CAMEL</a> — Li et al. 2023. Role-playing origin.</li>
+        <li><a href="https://arxiv.org/abs/2508.01531">Revisiting Gossip Protocols</a> — Aug 2025.</li>
+        <li><a href="https://iceberg.mit.edu/protocol.pdf">Ripple Effect Protocol</a> — MIT 2025. Sensitivity signals.</li>
+        <li><a href="https://agentrxiv.github.io/">AgentRxiv</a> — Collaborative autonomous research.</li>
+        <li>Foundational pointers: Reynolds, <em>Flocks, Herds, and Schools</em> (SIGGRAPH 1987); Reid Smith, <em>The Contract Net Protocol</em> (IEEE TC 1980); Dorigo, <em>Ant Colony Optimization</em> (MIT Press 2004); Corkill, <em>Blackboard Systems</em> (AI Expert 1991); Minsky, <em>The Society of Mind</em> (1986).</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="landscape">
+    <h2>2. Open-source frameworks for multi-agent orchestration</h2>
+    <p class="lede">Frameworks are <em>one</em> way to realize the patterns in §1 — not the only way. Treat this section as a reference catalog: each entry is an opinionated bundle of the primitives above. The field consolidated sharply in 2025–2026: AutoGen + Semantic Kernel became Microsoft Agent Framework, OpenAI Swarm became the Agents SDK, Phidata became Agno.</p>
+
+    <div class="pill-row">
+      <span class="chip status-active">● active</span>
+      <span class="chip status-maint">● maintenance</span>
+      <span class="chip status-dead">● deprecated / abandoned</span>
+    </div>
+
+    <div class="grid">
+
+      <div class="card">
+        <h3>Microsoft Agent Framework</h3>
+        <div class="repo"><a href="https://github.com/microsoft/agent-framework">github.com/microsoft/agent-framework</a></div>
+        <p class="desc">Microsoft's production successor to AutoGen and Semantic Kernel. v1.0 GA April 2, 2026.</p>
+        <ul>
+          <li>Graph-based workflow orchestration</li>
+          <li>Session-based state + middleware</li>
+          <li>Python + .NET, type-safe APIs</li>
+          <li>Azure AI Foundry integration, enterprise SLAs</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active · v1.0</span>
+          <span class="chip lang">Python/C#</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~3k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Microsoft AutoGen</h3>
+        <div class="repo"><a href="https://github.com/microsoft/autogen">github.com/microsoft/autogen</a></div>
+        <p class="desc">Conversational multi-agent framework; new work now flows into Agent Framework.</p>
+        <ul>
+          <li>GroupChat + conversable agent patterns</li>
+          <li>Distributed actor runtime (v0.4)</li>
+          <li>Tool/function calling, human-in-the-loop</li>
+          <li>Python + .NET</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-maint">maintenance</span>
+          <span class="chip lang">Python/.NET</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~56.8k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>AG2 (AutoGen fork)</h3>
+        <div class="repo"><a href="https://github.com/ag2ai/ag2">github.com/ag2ai/ag2</a></div>
+        <p class="desc">Community-governed fork of original AutoGen — "The Open-Source AgentOS".</p>
+        <ul>
+          <li>Preserves GroupChat / conversable agents</li>
+          <li>Adds swarm + captain-agent patterns</li>
+          <li>RealtimeAgent (voice)</li>
+          <li>Open AG2AI governance</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">Apache 2.0</span>
+          <span class="chip stars">~3k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>CrewAI</h3>
+        <div class="repo"><a href="https://github.com/crewAIInc/crewAI">github.com/crewAIInc/crewAI</a></div>
+        <p class="desc">Role-playing autonomous agents collaborating as a "crew".</p>
+        <ul>
+          <li>Role / goal / backstory abstraction</li>
+          <li>Sequential &amp; hierarchical processes</li>
+          <li>Flows (event-driven)</li>
+          <li>Independent of LangChain; enterprise tier</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~46k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>LangGraph</h3>
+        <div class="repo"><a href="https://github.com/langchain-ai/langgraph">github.com/langchain-ai/langgraph</a></div>
+        <p class="desc">Low-level graph orchestration for resilient LLM agents, from LangChain.</p>
+        <ul>
+          <li>Explicit DAG / state-machine graphs</li>
+          <li>Shared state + checkpointing + time-travel</li>
+          <li>Supervisor &amp; swarm patterns</li>
+          <li>Human-in-the-loop interrupts</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python / JS</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~28.8k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>OpenAI Agents SDK</h3>
+        <div class="repo"><a href="https://github.com/openai/openai-agents-python">github.com/openai/openai-agents-python</a></div>
+        <p class="desc">Lightweight production framework; successor to the archived Swarm.</p>
+        <ul>
+          <li>Agents-as-handoffs primitive</li>
+          <li>Guardrails + tracing + structured outputs</li>
+          <li>Native MCP support</li>
+          <li>TypeScript port available</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python + TS</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~20.5k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>MetaGPT</h3>
+        <div class="repo"><a href="https://github.com/FoundationAgents/MetaGPT">github.com/FoundationAgents/MetaGPT</a></div>
+        <p class="desc">Multi-agent framework that simulates a software company from a one-line requirement.</p>
+        <ul>
+          <li>SOP-encoded roles (PM, architect, engineer, QA)</li>
+          <li>Message-passing via shared environment</li>
+          <li>Document artifacts (PRD → design → code)</li>
+          <li>AFlow auto-workflow generation</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~66.7k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>CAMEL</h3>
+        <div class="repo"><a href="https://github.com/camel-ai/camel">github.com/camel-ai/camel</a></div>
+        <p class="desc">Research-oriented framework exploring "scaling laws of agents".</p>
+        <ul>
+          <li>Role-playing inception prompting</li>
+          <li>20+ agent society patterns</li>
+          <li>OASIS million-agent social simulator</li>
+          <li>CRAB benchmark + modular workforces</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">Apache 2.0</span>
+          <span class="chip stars">~16.6k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>smolagents</h3>
+        <div class="repo"><a href="https://github.com/huggingface/smolagents">github.com/huggingface/smolagents</a></div>
+        <p class="desc">Hugging Face's barebones (~1k LoC) library for agents that "think in code".</p>
+        <ul>
+          <li>CodeAgent writes Python actions, not JSON</li>
+          <li>Sandboxed exec (E2B / Modal / Docker / Pyodide)</li>
+          <li>Model-agnostic via LiteLLM</li>
+          <li>Async agent loops</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">Apache 2.0</span>
+          <span class="chip stars">~26k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>PydanticAI</h3>
+        <div class="repo"><a href="https://github.com/pydantic/pydantic-ai">github.com/pydantic/pydantic-ai</a></div>
+        <p class="desc">Type-safe agent framework — "the FastAPI feeling for GenAI".</p>
+        <ul>
+          <li>Pydantic-validated structured outputs</li>
+          <li>Dependency injection + streaming validation</li>
+          <li>Logfire observability built in</li>
+          <li>Graph-based multi-agent + native MCP</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active · v1.x</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~16k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Agno (ex-Phidata)</h3>
+        <div class="repo"><a href="https://github.com/agno-agi/agno">github.com/agno-agi/agno</a></div>
+        <p class="desc">High-performance runtime for deploying agentic software at scale.</p>
+        <ul>
+          <li>~2 µs agent instantiation, 3.75 KiB footprint</li>
+          <li>Multi-agent "teams" primitive</li>
+          <li>Built-in memory, knowledge, vector DB</li>
+          <li>AgentOS runtime + monitoring</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MPL-2.0</span>
+          <span class="chip stars">~39k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>LlamaIndex Workflows</h3>
+        <div class="repo"><a href="https://github.com/run-llama/llama_index">github.com/run-llama/llama_index</a></div>
+        <p class="desc">Retrieval-centric framework; Workflows 1.0 is the agent layer.</p>
+        <ul>
+          <li>Event-driven async Workflows</li>
+          <li>AgentWorkflow multi-agent orchestrator</li>
+          <li>FunctionAgent / ReActAgent primitives</li>
+          <li>Deep RAG integration, Python + TS</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python + TS</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~48.4k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Google ADK</h3>
+        <div class="repo"><a href="https://github.com/google/adk-python">github.com/google/adk-python</a></div>
+        <p class="desc">Agent Development Kit powering Google's Agent Engine.</p>
+        <ul>
+          <li>Hierarchical multi-agent composition</li>
+          <li>Sequential / Parallel / Loop workflow agents</li>
+          <li>Model-agnostic, Gemini-optimized</li>
+          <li>A2A protocol + MCP + eval UI</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active · bi-weekly</span>
+          <span class="chip lang">Py / Go / TS / Java</span>
+          <span class="chip lic">Apache 2.0</span>
+          <span class="chip stars">~18.3k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Claude Agent SDK</h3>
+        <div class="repo"><a href="https://github.com/anthropics/claude-agent-sdk-python">github.com/anthropics/claude-agent-sdk-python</a></div>
+        <p class="desc">Embed Claude Code-style agents into your own applications.</p>
+        <ul>
+          <li>Full Claude Code toolset (Read/Write/Edit/Bash)</li>
+          <li>Custom in-process MCP tools + hooks</li>
+          <li>Subagent spawning, session management</li>
+          <li>Python + TypeScript parity</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python / TS</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~6k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Strands Agents (AWS)</h3>
+        <div class="repo"><a href="https://github.com/strands-agents">github.com/strands-agents</a></div>
+        <p class="desc">Model-driven agent SDK from AWS; open source, not AWS-locked.</p>
+        <ul>
+          <li>Graph + Swarm + Workflow multi-agent patterns</li>
+          <li>A2A protocol for cross-framework interop</li>
+          <li>Native MCP + OpenTelemetry</li>
+          <li>Deploys to Lambda / Fargate / EKS / AgentCore</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python + TS</span>
+          <span class="chip lic">Apache 2.0</span>
+          <span class="chip stars">~5k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Mastra</h3>
+        <div class="repo"><a href="https://github.com/mastra-ai/mastra">github.com/mastra-ai/mastra</a></div>
+        <p class="desc">TypeScript-first agent framework from the Gatsby.js founders. v1.0 Jan 2026.</p>
+        <ul>
+          <li>Typed agents / workflows / RAG pipelines</li>
+          <li>Mastra Studio local IDE</li>
+          <li>MCP client + server + durable workflows</li>
+          <li>300k+ weekly npm downloads</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active · v1.0</span>
+          <span class="chip lang">TypeScript</span>
+          <span class="chip lic">Apache 2.0</span>
+          <span class="chip stars">~22k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>VoltAgent</h3>
+        <div class="repo"><a href="https://github.com/VoltAgent/voltagent">github.com/VoltAgent/voltagent</a></div>
+        <p class="desc">Open-source TypeScript agent framework + VoltOps console.</p>
+        <ul>
+          <li>Supervisor / sub-agent orchestration</li>
+          <li>Typed tools, memory, RAG, guardrails, voice</li>
+          <li>30+ LLM providers via Vercel AI SDK</li>
+          <li>n8n-style observability</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">TypeScript</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~5.1k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Atomic Agents</h3>
+        <div class="repo"><a href="https://github.com/BrainBlend-AI/atomic-agents">github.com/BrainBlend-AI/atomic-agents</a></div>
+        <p class="desc">Lightweight, schema-driven framework following Atomic Design principles.</p>
+        <ul>
+          <li>Pydantic input/output schemas</li>
+          <li>Single-purpose composable components</li>
+          <li>Atomic Forge tool library</li>
+          <li>Multi-provider via Instructor</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active · v2</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~4k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>DSPy</h3>
+        <div class="repo"><a href="https://github.com/stanfordnlp/dspy">github.com/stanfordnlp/dspy</a></div>
+        <p class="desc">Stanford NLP's "programming — not prompting — language models". Not a MAS orchestrator per se, but composable modules support multi-agent patterns.</p>
+        <ul>
+          <li>Declarative Modules + Signatures</li>
+          <li>Automatic prompt/weight optimization</li>
+          <li>ReAct and tool-use primitives</li>
+          <li>Compiled pipelines</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-active">active</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MIT</span>
+          <span class="chip stars">~23k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>AutoGPT</h3>
+        <div class="repo"><a href="https://github.com/Significant-Gravitas/AutoGPT">github.com/Significant-Gravitas/AutoGPT</a></div>
+        <p class="desc">The original autonomous GPT agent, now pivoted to a block-based low-code platform.</p>
+        <ul>
+          <li>Visual workflow builder + block marketplace</li>
+          <li>Scheduled agents, self-hosted or managed</li>
+          <li>Classic CLI agent preserved separately</li>
+          <li>No longer a MAS framework in the 2023 sense</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-maint">pivoted</span>
+          <span class="chip lang">Py / TS</span>
+          <span class="chip lic">MIT + Polyform</span>
+          <span class="chip stars">~183k ★</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>OpenAI Swarm</h3>
+        <div class="repo"><a href="https://github.com/openai/swarm">github.com/openai/swarm</a></div>
+        <p class="desc">Archived March 2025. Use the Agents SDK instead.</p>
+        <ul>
+          <li>Historical reference only</li>
+          <li>Educational handoff patterns</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-dead">archived</span>
+          <span class="chip lang">Python</span>
+          <span class="chip lic">MIT</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>AgentGPT</h3>
+        <div class="repo"><a href="https://github.com/reworkd/AgentGPT">github.com/reworkd/AgentGPT</a></div>
+        <p class="desc">Browser-based autonomous goal executor. Development stopped Nov 2023; Reworkd pivoted July 2024. Listed only because it's still widely referenced.</p>
+        <ul>
+          <li>130+ untriaged open issues</li>
+          <li>No roadmap</li>
+        </ul>
+        <div class="footer">
+          <span class="chip status-dead">abandoned</span>
+          <span class="chip lang">TypeScript</span>
+          <span class="chip lic">GPL-3.0</span>
+          <span class="chip stars">~35k ★</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="consolidation">
+    <h2>3. 2026 consolidation signals</h2>
+    <p class="lede">Three trends define the current landscape.</p>
+
+    <div class="callout">
+      <strong>Mergers and rebrands.</strong> AutoGen + Semantic Kernel → Microsoft Agent Framework. OpenAI Swarm → Agents SDK. Phidata → Agno. Treat old names as pointers. Pinning old versions in production is now a liability.
+    </div>
+
+    <div class="callout">
+      <strong>TypeScript tier is real.</strong> Mastra, VoltAgent, Claude Agent SDK TS, OpenAI Agents SDK TS, ADK-JS, Strands TS — the JS/TS agent ecosystem has caught up in 2025–2026. No longer Python-only.
+    </div>
+
+    <div class="callout">
+      <strong>Interop standards are crystallizing.</strong> Two protocols are becoming table-stakes: <strong>MCP</strong> (tools/context — Anthropic) and <strong>A2A</strong> (agent-to-agent wire protocol — Google/AWS/Strands). Frameworks without either are drifting toward irrelevance.
+    </div>
+  </section>
+
+  <section id="problems">
+    <h2>4. What problems are MAS actually good for?</h2>
+    <p class="lede">Multi-agent architectures earn their complexity budget when a problem has one or more of: natural decomposition, heterogeneous expertise, concurrency, adversarial structure, or emergent dynamics a monolith cannot represent. Eleven categories where they win clearly.</p>
+
+    <div class="problem-list">
+
+      <div class="problem">
+        <h3>1. Role-specialized cognitive workflows</h3>
+        <p>Planner / executor / critic splits let each role be tuned, budgeted, and evaluated independently. The explicit critic pass demonstrably reduces hallucination.</p>
+        <p class="ex">e.g. MetaGPT's PM→Architect→Engineer→QA pipeline — <a href="https://arxiv.org/abs/2308.00352">Hong et al., ICLR 2024</a>.</p>
+      </div>
+
+      <div class="problem">
+        <h3>2. Parallel research &amp; exploration</h3>
+        <p>When a question decomposes into independent sub-queries, parallel workers cut wall-clock latency near-linearly and expand search coverage. This is the dominant production use case in 2025–2026.</p>
+        <p class="ex">e.g. <a href="https://www.anthropic.com/engineering/built-multi-agent-research-system">Anthropic's multi-agent research system</a>, OpenAI Deep Research.</p>
+      </div>
+
+      <div class="problem">
+        <h3>3. Distributed problem solving over partitioned state</h3>
+        <p>When data, sensors, or constraints are physically or logically partitioned so no single agent sees the whole state, MAS is required by construction. DCOP / DCSP formalize this.</p>
+        <p class="ex">e.g. smart-grid load balancing — <a href="https://www.jair.org/index.php/jair/article/view/11212">Fioretto et al., JAIR 2018</a>.</p>
+      </div>
+
+      <div class="problem">
+        <h3>4. Social / economic / epidemiological simulation</h3>
+        <p>Agent-based modeling is the canonical method for emergent phenomena where heterogeneous individuals drive aggregate outcomes equation-based models cannot capture.</p>
+        <p class="ex">e.g. <a href="https://arxiv.org/abs/2304.03442">Generative Agents</a> (Park et al., UIST 2023); Imperial College COVID-19 ABM.</p>
+      </div>
+
+      <div class="problem">
+        <h3>5. Robotic swarms &amp; multi-robot coordination</h3>
+        <p>Physical robots with local sensing require decentralized coordination because bandwidth, latency, and fault-tolerance forbid a central controller.</p>
+        <p class="ex">e.g. Kiva / Amazon Robotics warehouse fleets; DARPA OFFSET drone swarms.</p>
+      </div>
+
+      <div class="problem">
+        <h3>6. Negotiation, auctions &amp; market simulation</h3>
+        <p>Markets are definitionally multi-agent: prices emerge from interaction of self-interested participants with private information. MAS is the only faithful way to model them.</p>
+        <p class="ex">e.g. Contract Net Protocol (Smith 1980); TAC supply-chain game; <a href="https://arxiv.org/abs/2402.05863">NegotiationArena</a> (Bianchi et al., 2024).</p>
+      </div>
+
+      <div class="problem">
+        <h3>7. Adversarial testing (red team / blue team)</h3>
+        <p>Safety and robustness evaluation benefits from an attacker agent vs. a defender in a closed loop — each improves the other and surfaces failure modes a static test suite cannot.</p>
+        <p class="ex">e.g. <a href="https://github.com/Azure/PyRIT">Microsoft PyRIT</a>; <a href="https://arxiv.org/abs/2202.03286">Perez et al., "Red Teaming LMs with LMs" EMNLP 2022</a>; Google Big Sleep.</p>
+      </div>
+
+      <div class="problem">
+        <h3>8. Supply-chain &amp; logistics under uncertainty</h3>
+        <p>Real supply chains have multiple autonomous stakeholders with local objectives and private data. Centralized optimization is politically and computationally infeasible.</p>
+        <p class="ex">e.g. MASCOT; Fox, Barbuceanu &amp; Teigen, IEEE IS 2000.</p>
+      </div>
+
+      <div class="problem">
+        <h3>9. Heterogeneous ETL / pipeline orchestration</h3>
+        <p>Data workflows where each stage needs different tools (SQL, vision, code, summarization) map naturally onto a DAG of specialist agents.</p>
+        <p class="ex">e.g. LangGraph plan-and-execute; DSPy-compiled document pipelines.</p>
+      </div>
+
+      <div class="problem">
+        <h3>10. Creative collaboration with critique</h3>
+        <p>Long-form creative work benefits from explicit separation of generation and critique — a single model conflates roles and loses the editor's adversarial stance.</p>
+        <p class="ex">e.g. <a href="https://arxiv.org/abs/2402.14207">Stanford STORM</a> (Shao et al., NAACL 2024); <a href="https://arxiv.org/abs/2308.07201">ChatEval</a> (ICLR 2024).</p>
+      </div>
+
+      <div class="problem">
+        <h3>11. Continuous monitoring &amp; reactive automation</h3>
+        <p>Event-driven systems scale better as independent loops subscribed to different signal types than as one giant polling agent. Exactly SynapBus's reactive-trigger model.</p>
+        <p class="ex">e.g. Splunk SOAR; on-call triage bots; SynapBus spec 014.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="toys">
+    <h2>5. Toy problems to benchmark a MAS orchestration system</h2>
+    <p class="lede">Good MAS benchmarks expose specific failure modes: deadlock, message-order dependence, role confusion, context blowup, byzantine agents, lost-update races. These eight are cheap to implement on top of SynapBus channels / DMs and each probes a distinct axis.</p>
+
+    <div class="toys">
+
+      <div class="toy">
+        <div class="num">01</div>
+        <div>
+          <h3>Blocks World with partitioned arms</h3>
+          <div class="tests">tests: planning · turn-taking · shared-state conflict resolution</div>
+          <dl>
+            <dt>Setup</dt><dd>6-block tower world. Two agents each control one "arm" and see only half the blocks. Cooperate to reach a goal configuration in ≤ N moves.</dd>
+            <dt>Why it bites</dt><dd>Classic AI planning with well-defined optimum. Exposes state-sync bugs, stale-view reads, and whether the framework supports atomic claim/release — a direct analog of SynapBus <code>claim_messages</code>.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="toy">
+        <div class="num">02</div>
+        <div>
+          <h3>Werewolf / Mafia social deduction</h3>
+          <div class="tests">tests: private memory · deception · voting · round persistence</div>
+          <dl>
+            <dt>Setup</dt><dd>6–8 LLM agents with hidden roles, day/night cycles as channels. Private night DMs, public day broadcast. Success = villagers win ≥ baseline rate; agents stay in character.</dd>
+            <dt>Why it bites</dt><dd>Stresses private vs. public channels, role-scoped memory, and whether the orchestrator prevents info leaks. Published baseline: Werewolf Arena (DeepMind, arXiv:2407.13943).</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="toy">
+        <div class="num">03</div>
+        <div>
+          <h3>Iterated Prisoner's Dilemma tournament</h3>
+          <div class="tests">tests: long-horizon memory · reputation · deterministic replay</div>
+          <dl>
+            <dt>Setup</dt><dd>N agents, round-robin pairings, 200 rounds each, fixed payoff matrix. Success = stable ranking across re-runs with fixed seeds.</dd>
+            <dt>Why it bites</dt><dd>Tiny payloads but huge volume. Exposes per-message overhead, trace scaling, and whether the framework can support deterministic replay for debugging. Axelrod's classic is the reference.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="toy">
+        <div class="num">04</div>
+        <div>
+          <h3>Collaborative story writing with critic veto</h3>
+          <div class="tests">tests: role specialization · revision loops · stopping conditions</div>
+          <dl>
+            <dt>Setup</dt><dd>Writer + Editor + Fact-Checker + Critic produce a 2000-word story. Critic has veto; loop until approved or budget exhausted.</dd>
+            <dt>Why it bites</dt><dd>Tests unbounded loops and budget enforcement. Failure mode: infinite revision — a real production hazard for any "agent with veto" pattern.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="toy" style="grid-template-columns: 40px 1fr;">
+        <div class="num">05</div>
+        <div>
+          <h3>Recursive Fermi estimate ("piano tuners in Chicago")</h3>
+          <div class="tests">tests: dynamic spawning · deduplication · aggregation under uncertainty · cost accounting · orphaned-spawn recovery</div>
+
+          <p style="font-size:0.92rem; color:#cbd2e0; margin:6px 0 14px;">
+            The classic question from physicist Enrico Fermi. You <em>cannot</em> look it up; you must decompose into estimable sub-quantities, estimate each, and multiply. This is a sharp MAS benchmark because <strong>the decomposition itself is the work</strong> — and decomposition is exactly what agent orchestration should be good at.
+          </p>
+
+          <h4 style="color:var(--accent); margin:14px 0 6px; font-size:0.95rem;">Canonical decomposition</h4>
+<pre style="background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin:6px 0 14px; font-size:0.82rem; color:#cbd2e0; overflow-x:auto;">tuners = (pianos in Chicago)
+       × (tunings per piano per year)
+       ÷ (tunings per tuner per year)
+
+pianos = population × (households per capita)
+                   × (piano ownership rate)
+       + commercial pianos (venues, schools, churches)</pre>
+          <p style="font-size:0.88rem; color:var(--muted); margin:0 0 16px;">Ground truth ≈ 125–250 professional tuners in the Chicago metro area. Success criterion: final estimate within one order of magnitude.</p>
+
+          <h4 style="color:var(--accent); margin:18px 0 8px; font-size:0.95rem;">Why it's a sharp MAS test — five failure axes</h4>
+          <dl>
+            <dt>Dynamic spawning</dt>
+            <dd>The orchestrator doesn't know up front how many sub-researchers it needs. Decomposition dictates fan-out. Tests whether the framework supports <em>runtime</em> subagent creation, not a predefined graph.</dd>
+            <dt>Duplicate-work detection</dt>
+            <dd>Naive orchestrators spawn two sub-agents that both research "Chicago population" independently. A well-designed system deduplicates via a shared scratchpad (blackboard!) or caches sub-results. Direct test of whether shared-memory patterns actually work.</dd>
+            <dt>Cost accounting</dt>
+            <dd>Fermi estimates are supposed to be <em>cheap</em>. If each sub-agent burns 50k tokens researching census data, you've failed the spirit of the task. Pairs accuracy with a hard token budget.</dd>
+            <dt>Aggregation under uncertainty</dt>
+            <dd>Each leaf estimate has an uncertainty range. A mature MAS propagates <em>ranges</em>, not point estimates. Tests whether agents can handle structured sub-results instead of concatenating strings.</dd>
+            <dt>Orphaned spawns</dt>
+            <dd>If a sub-agent fails or times out, does the orchestrator notice, retry, or silently drop the branch? A 5-branch Fermi estimate with one silent drop produces a confident wrong answer — the worst possible failure mode.</dd>
+          </dl>
+
+          <h4 style="color:var(--accent); margin:18px 0 8px; font-size:0.95rem;">Concrete setup for SynapBus</h4>
+          <ul style="font-size:0.9rem; color:#cbd2e0;">
+            <li>One <code>fermi-orchestrator</code> agent with authority to spawn ≤ 5 <code>fermi-researcher</code> subagents via reactive triggers.</li>
+            <li>Shared channel <code>#fermi-scratchpad</code> as the blackboard — all sub-results posted here with a fixed schema.</li>
+            <li>Each sub-agent has a <code>WebSearch</code> tool with per-call token limit.</li>
+            <li>Orchestrator monitors scratchpad via <code>list_by_state</code>, marks the task done when all leaves posted.</li>
+          </ul>
+
+          <h4 style="color:var(--accent); margin:18px 0 8px; font-size:0.95rem;">Scratchpad schema (enforced)</h4>
+<pre style="background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin:6px 0 14px; font-size:0.8rem; color:#cbd2e0; overflow-x:auto;">{
+  "quantity":  "chicago_population",
+  "value":     2.7e6,
+  "low":       2.6e6,
+  "high":      2.8e6,
+  "confidence": 0.95,
+  "source":    "census.gov/quickfacts/chicagocityillinois",
+  "parent":    null
+}</pre>
+
+          <h4 style="color:var(--accent); margin:18px 0 8px; font-size:0.95rem;">Success criteria (all must hold)</h4>
+          <ul style="font-size:0.9rem; color:#cbd2e0;">
+            <li>Final estimate within 1 OOM of ground truth (≥ 25 and ≤ 2,500 tuners)</li>
+            <li>Total tokens ≤ <strong>10k</strong> across orchestrator + all sub-agents</li>
+            <li>Zero duplicate sub-queries (verified by grepping <code>quantity</code> field)</li>
+            <li>All spawned branches reach terminal state (done or failed, never orphan)</li>
+            <li>Aggregation uses ranges, not point estimates; final answer includes a low/high bound</li>
+          </ul>
+
+          <h4 style="color:var(--accent); margin:18px 0 8px; font-size:0.95rem;">Failure modes this catches that nothing else does</h4>
+          <ul style="font-size:0.9rem; color:#cbd2e0;">
+            <li><strong>Cost explosion</strong> from unbounded recursion (sub-agents spawning sub-sub-agents)</li>
+            <li><strong>Silent branch loss</strong> — a sub-agent returns nothing and the orchestrator averages 0 into the product</li>
+            <li><strong>Over-convergence</strong> — all sub-agents copying each other's bad assumption because they read the scratchpad before contributing (a subtle failure mode of premature information sharing)</li>
+            <li><strong>Point-estimate collapse</strong> — losing uncertainty bands so the final answer looks precise when it isn't</li>
+          </ul>
+
+          <blockquote style="margin-top:16px;">
+            This is basically the <a href="https://www.anthropic.com/engineering/built-multi-agent-research-system">Anthropic multi-agent researcher pattern</a> reduced to a 10-minute test you can run deterministically. If your framework can't pass Fermi, it can't do Deep Research.
+          </blockquote>
+        </div>
+      </div>
+
+      <div class="toy">
+        <div class="num">06</div>
+        <div>
+          <h3>Grid-world treasure hunt with fog of war</h3>
+          <div class="tests">tests: async coordination · partial observability · map merging · pub/sub</div>
+          <dl>
+            <dt>Setup</dt><dd>10×10 grid, 3 agents, each sees 3×3 window around itself. Find and retrieve 5 treasures. Communication only via a shared "map" channel.</dd>
+            <dt>Why it bites</dt><dd>Forces publishing structured observations and merging them. Tests channel throughput and message-ordering preservation under concurrent writes.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="toy">
+        <div class="num">07</div>
+        <div>
+          <h3>Parallel bug triage from a synthetic issue tracker</h3>
+          <div class="tests">tests: work-stealing · duplicate-claim prevention · routing · done/fail accounting</div>
+          <dl>
+            <dt>Setup</dt><dd>50 synthetic bug reports (frontend/backend/infra mix). 3 specialist agents pull from a queue, classify, fix or escalate. Success = all bugs terminally resolved, zero double-processing, ≥ 90% correct routing.</dd>
+            <dt>Why it bites</dt><dd>Almost a unit test for SynapBus's <code>claim_messages</code> / <code>mark_done</code> / StalemateWorker pattern. Exposes lease-expiry bugs and whether failed messages re-queue cleanly.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="toy">
+        <div class="num">08</div>
+        <div>
+          <h3>Overcooked-style real-time coordination</h3>
+          <div class="tests">tests: tight temporal coordination · latency sensitivity · implicit communication</div>
+          <dl>
+            <dt>Setup</dt><dd>2 agents in a simplified kitchen grid must prepare N soups under a time limit. Reference env: Carroll et al., NeurIPS 2019 (arXiv:1910.05789).</dd>
+            <dt>Why it bites</dt><dd>The only benchmark here that punishes message latency directly. If the framework adds 500ms per hop, the score shows it. Exposes whether turn-based dialogue assumptions break under real-time load.</dd>
+          </dl>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="recommendation">
+    <h2>6. Recommendation for SynapBus</h2>
+    <p class="lede">If you only implement three benchmarks, implement these.</p>
+    <div class="callout">
+      <strong>Tier A — infrastructure correctness:</strong> <em>Parallel bug triage (#7)</em> and <em>Blocks World with partitioned arms (#1)</em>. These directly exercise claim/release semantics, lease expiry, and shared-state conflict — the hardest parts to get right in a message bus.
+    </div>
+    <div class="callout">
+      <strong>Tier B — realistic LLM workload:</strong> <em>Recursive Fermi estimate (#5)</em> and <em>Collaborative story writing (#4)</em>. Stress the patterns your actual users run (fan-out research, revision loops with critics).
+    </div>
+    <div class="callout">
+      <strong>Tier C — all-round smoke test:</strong> <em>Werewolf (#2)</em>. Exercises channels, DMs, role-scoped memory, and workflow reactions simultaneously. The best single integration test for a Slack-like agent hub.
+    </div>
+    <p style="color:var(--muted); font-size:0.88rem; margin-top:24px;">
+      For reference, SynapBus's existing wiki contains four closely-related articles worth consulting before starting: <code>agent-messaging-patterns</code>, <code>synapbus-architecture</code>, <code>ai-agent-governance</code>, <code>mcp-adoption-enterprise</code>.
+    </p>
+  </section>
+
+</main>
+
+<footer>
+  Report generated 2026-04-10 · Parallel research via SynapBus subagents · Static HTML, no external assets ·
+  <code>multiagent_systems_report.html</code>
+</footer>
+
+</body>
+</html>

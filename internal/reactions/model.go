@@ -14,6 +14,9 @@ const (
 	ReactionInProgress = "in_progress"
 	ReactionDone       = "done"
 	ReactionPublished  = "published"
+	// ReactionAwarded is used on auction-channel bid messages to designate
+	// the winning bid (spec 016, FR-008). Added in feature 016.
+	ReactionAwarded = "awarded"
 )
 
 // Workflow states (derived from reactions).
@@ -24,6 +27,7 @@ const (
 	StateRejected   = "rejected"
 	StateDone       = "done"
 	StatePublished  = "published"
+	StateAwarded    = "awarded"
 )
 
 // reactionPriority maps reaction types to their priority for state derivation.
@@ -32,8 +36,9 @@ var reactionPriority = map[string]int{
 	ReactionApprove:    2,
 	ReactionInProgress: 3,
 	ReactionReject:     4,
-	ReactionDone:       5,
-	ReactionPublished:  6,
+	ReactionAwarded:    5,
+	ReactionDone:       6,
+	ReactionPublished:  7,
 }
 
 // reactionToState maps reaction types to workflow states.
@@ -41,6 +46,7 @@ var reactionToState = map[string]string{
 	ReactionApprove:    StateApproved,
 	ReactionReject:     StateRejected,
 	ReactionInProgress: StateInProgress,
+	ReactionAwarded:    StateAwarded,
 	ReactionDone:       StateDone,
 	ReactionPublished:  StatePublished,
 }
@@ -57,7 +63,7 @@ const MaxReactionsPerMessage = 100
 
 // Sentinel errors.
 var (
-	ErrInvalidReaction = errors.New("invalid reaction type: must be one of approve, reject, in_progress, done, published")
+	ErrInvalidReaction = errors.New("invalid reaction type: must be one of approve, reject, in_progress, awarded, done, published")
 	ErrReactionLimit   = errors.New("maximum reactions per message (100) reached")
 	ErrNotMember       = errors.New("only channel members can react to messages")
 )
@@ -77,6 +83,7 @@ var ValidReactions = map[string]bool{
 	ReactionApprove:    true,
 	ReactionReject:     true,
 	ReactionInProgress: true,
+	ReactionAwarded:    true,
 	ReactionDone:       true,
 	ReactionPublished:  true,
 }

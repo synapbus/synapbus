@@ -38,6 +38,7 @@ import (
 	"github.com/synapbus/synapbus/internal/health"
 	"github.com/synapbus/synapbus/internal/jsruntime"
 	k8spkg "github.com/synapbus/synapbus/internal/k8s"
+	"github.com/synapbus/synapbus/internal/marketplace"
 	mcpserver "github.com/synapbus/synapbus/internal/mcp"
 	"github.com/synapbus/synapbus/internal/agentquery"
 	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
@@ -499,6 +500,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	wikiService := wiki.NewService(db.DB)
 
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, wikiService, con, jsPool, actionRegistry, actionIndex, db.DB)
+
+	// Wire the agent marketplace (spec 016 MVP).
+	marketplaceStore := marketplace.NewStore(db.DB)
+	marketplaceSvc := marketplace.NewService(marketplaceStore, wikiService, swarmService, channelService, msgService, tracer)
+	mcpSrv.SetMarketplaceService(marketplaceSvc)
+	slog.Info("agent marketplace service initialized (spec 016)")
 
 	// Set up SQL query executor for agents (uses read pool if available)
 	queryDB := db.QueryDB()
