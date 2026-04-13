@@ -135,7 +135,8 @@ func (s *SQLiteAgentStore) ListReactiveAgents(ctx context.Context) ([]*Agent, er
 // agentSelectSQL returns the base SELECT clause for agent queries.
 func agentSelectSQL() string {
 	return `SELECT id, name, display_name, type, capabilities, owner_id, api_key_hash, status, created_at, updated_at,
-		 trigger_mode, cooldown_seconds, daily_trigger_budget, max_trigger_depth, k8s_image, k8s_env_json, k8s_resource_preset, pending_work
+		 trigger_mode, cooldown_seconds, daily_trigger_budget, max_trigger_depth, k8s_image, k8s_env_json, k8s_resource_preset, pending_work,
+		 harness_name, local_command, harness_config_json
 		 FROM agents`
 }
 
@@ -241,6 +242,7 @@ func (s *SQLiteAgentStore) scanAgent(row *sql.Row) (*Agent, error) {
 	var agent Agent
 	var caps string
 	var k8sImage, k8sEnvJSON sql.NullString
+	var harnessName, localCommand, harnessConfigJSON sql.NullString
 	var pendingWork int
 	err := row.Scan(
 		&agent.ID, &agent.Name, &agent.DisplayName, &agent.Type,
@@ -249,6 +251,7 @@ func (s *SQLiteAgentStore) scanAgent(row *sql.Row) (*Agent, error) {
 		&agent.TriggerMode, &agent.CooldownSeconds, &agent.DailyTriggerBudget,
 		&agent.MaxTriggerDepth, &k8sImage, &k8sEnvJSON,
 		&agent.K8sResourcePreset, &pendingWork,
+		&harnessName, &localCommand, &harnessConfigJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -257,6 +260,9 @@ func (s *SQLiteAgentStore) scanAgent(row *sql.Row) (*Agent, error) {
 	agent.K8sImage = k8sImage.String
 	agent.K8sEnvJSON = k8sEnvJSON.String
 	agent.PendingWork = pendingWork != 0
+	agent.HarnessName = harnessName.String
+	agent.LocalCommand = localCommand.String
+	agent.HarnessConfigJSON = harnessConfigJSON.String
 	return &agent, nil
 }
 
@@ -266,6 +272,7 @@ func (s *SQLiteAgentStore) scanAgents(rows *sql.Rows) ([]*Agent, error) {
 		var agent Agent
 		var caps string
 		var k8sImage, k8sEnvJSON sql.NullString
+		var harnessName, localCommand, harnessConfigJSON sql.NullString
 		var pendingWork int
 		err := rows.Scan(
 			&agent.ID, &agent.Name, &agent.DisplayName, &agent.Type,
@@ -274,6 +281,7 @@ func (s *SQLiteAgentStore) scanAgents(rows *sql.Rows) ([]*Agent, error) {
 			&agent.TriggerMode, &agent.CooldownSeconds, &agent.DailyTriggerBudget,
 			&agent.MaxTriggerDepth, &k8sImage, &k8sEnvJSON,
 			&agent.K8sResourcePreset, &pendingWork,
+			&harnessName, &localCommand, &harnessConfigJSON,
 		)
 		if err != nil {
 			return nil, err
@@ -282,6 +290,9 @@ func (s *SQLiteAgentStore) scanAgents(rows *sql.Rows) ([]*Agent, error) {
 		agent.K8sImage = k8sImage.String
 		agent.K8sEnvJSON = k8sEnvJSON.String
 		agent.PendingWork = pendingWork != 0
+		agent.HarnessName = harnessName.String
+		agent.LocalCommand = localCommand.String
+		agent.HarnessConfigJSON = harnessConfigJSON.String
 		agents = append(agents, &agent)
 	}
 	if agents == nil {

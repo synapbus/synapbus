@@ -1,0 +1,139 @@
+# OpenTelemetry Collector for kubic.home.arpa
+#
+# Installs a single-replica otelcol-contrib in the `synapbus` namespace.
+# Accepts OTLP over gRPC (4317) and HTTP (4318) and forwards traces to
+# stdout for now; swap in a Tempo / Jaeger exporter once one is up.
+#
+# Apply with:
+#   kubectl apply -f deploy/kubic/otel-collector.yaml
+#
+# SynapBus points at this collector via:
+#   SYNAPBUS_OTEL_ENABLED=1
+#   SYNAPBUS_OTEL_ENDPOINT=otel-collector.synapbus.svc.cluster.local:4318
+#   SYNAPBUS_OTEL_INSECURE=1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: synapbus
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 512
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+
+    exporters:
+      debug:
+        verbosity: normal
+        sampling_initial: 5
+        sampling_thereafter: 200
+      # TODO: wire a Tempo / Jaeger / Loki exporter once one is running
+      # on kubic. Until then, `debug` prints a sampled summary to stdout.
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+      telemetry:
+        logs:
+          level: info
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: synapbus
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: synapbus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+    spec:
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.118.0
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 4317
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 4317
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: synapbus
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: synapbus
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318

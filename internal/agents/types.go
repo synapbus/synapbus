@@ -41,4 +41,9 @@ type Agent struct {
 	K8sEnvJSON         string `json:"k8s_env_json,omitempty"`
 	K8sResourcePreset  string `json:"k8s_resource_preset"`
 	PendingWork        bool   `json:"pending_work"`
+
+	// Harness-agnostic execution fields (migration 019).
+	HarnessName       string `json:"harness_name,omitempty"`        // explicit backend; empty = auto-resolve
+	LocalCommand      string `json:"local_command,omitempty"`       // JSON-encoded argv for subprocess backend
+	HarnessConfigJSON string `json:"harness_config_json,omitempty"` // opaque per-backend config
 }

@@ -45,7 +45,10 @@ func setupTestDB(t *testing.T) *sql.DB {
 			k8s_image TEXT,
 			k8s_env_json TEXT,
 			k8s_resource_preset TEXT NOT NULL DEFAULT 'default',
-			pending_work INTEGER NOT NULL DEFAULT 0
+			pending_work INTEGER NOT NULL DEFAULT 0,
+			harness_name TEXT,
+			local_command TEXT,
+			harness_config_json TEXT
 		);
 		CREATE TABLE reactive_runs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -44,6 +44,7 @@ import (
 	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/messaging"
 	prommetrics "github.com/synapbus/synapbus/internal/metrics"
+	"github.com/synapbus/synapbus/internal/observability"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/search/embedding"
@@ -193,6 +194,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialise OpenTelemetry tracing (opt-in via SYNAPBUS_OTEL_ENABLED=1).
+	// Harmless when disabled — installs only the W3C propagator and
+	// leaves the global tracer provider as the default no-op.
+	otelShutdown, err := observability.Init(ctx, observability.ConfigFromEnv(os.Getenv), logger)
+	if err != nil {
+		return fmt.Errorf("init otel: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = otelShutdown(shutdownCtx)
+	}()
 
 	slog.Info("starting SynapBus",
 		"host", host,
