@@ -29,6 +29,14 @@ type AgentConfig struct {
 	// by Codex / Gemini CLIs that follow the AGENTS.md convention.
 	AgentsMD string `json:"agents_md,omitempty"`
 
+	// GeminiMD is the content of GEMINI.md written into workdir. The
+	// Gemini CLI reads this as the workspace system instructions.
+	// When set, MaterialiseAgentConfig ALSO writes a matching
+	// workdir/.gemini/settings.json containing the MCP servers below,
+	// so `gemini` invoked from the workdir sees both the role prompt
+	// and the agent's MCP tool surface in one step.
+	GeminiMD string `json:"gemini_md,omitempty"`
+
 	// MCPServers become the `mcpServers` object in workdir/.mcp.json.
 	// Claude Code picks this up from cwd automatically; other CLIs
 	// can be pointed at it with an explicit flag in local_command.
@@ -113,6 +121,20 @@ func MaterialiseAgentConfig(workdir string, cfg AgentConfig) error {
 			return err
 		}
 	}
+	if cfg.GeminiMD != "" {
+		if err := writeFile(filepath.Join(workdir, "GEMINI.md"), cfg.GeminiMD); err != nil {
+			return err
+		}
+		// A workspace-level .gemini/settings.json with mcpServers
+		// overrides the user's ~/.gemini/settings.json for MCP
+		// discovery, so the agent sees exactly the servers the
+		// operator configured here. We write an empty mcpServers
+		// block even when MCPServers is empty — this explicitly
+		// clears any inherited home-level servers.
+		if err := writeGeminiSettings(workdir, cfg.MCPServers); err != nil {
+			return err
+		}
+	}
 	if len(cfg.MCPServers) > 0 {
 		if err := writeMCPConfig(workdir, cfg.MCPServers); err != nil {
 			return err
@@ -145,6 +167,39 @@ type mcpServerEntry struct {
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+}
+
+// geminiSettingsFile is the shape Gemini CLI expects at
+// .gemini/settings.json. We keep it minimal — only mcpServers — so we
+// don't clobber unrelated settings the user might merge in later.
+type geminiSettingsFile struct {
+	MCPServers map[string]mcpServerEntry `json:"mcpServers"`
+}
+
+func writeGeminiSettings(workdir string, servers []MCPServerSpec) error {
+	out := geminiSettingsFile{MCPServers: map[string]mcpServerEntry{}}
+	for _, s := range servers {
+		if s.Name == "" {
+			continue
+		}
+		out.MCPServers[s.Name] = mcpServerEntry{
+			Type:    s.Type,
+			Command: s.Command,
+			Args:    s.Args,
+			URL:     s.URL,
+			Headers: s.Headers,
+			Env:     s.Env,
+		}
+	}
+	raw, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("subprocess: marshal gemini settings: %w", err)
+	}
+	dir := filepath.Join(workdir, ".gemini")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("subprocess: mkdir .gemini: %w", err)
+	}
+	return writeFile(filepath.Join(dir, "settings.json"), string(raw))
 }
 
 func writeMCPConfig(workdir string, servers []MCPServerSpec) error {

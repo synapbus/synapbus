@@ -159,6 +159,8 @@ func (s *AdminServer) dispatch(req Request) Response {
 		return s.handleMessagesList(ctx, req.Args)
 	case "messages.search":
 		return s.handleMessagesSearch(ctx, req.Args)
+	case "messages.send":
+		return s.handleMessagesSend(ctx, req.Args)
 
 	// --- channels ---
 	case "channels.list":
@@ -1694,6 +1696,65 @@ func (s *AdminServer) handleAttachmentsGC(ctx context.Context) Response {
 	return Response{OK: true, Data: map[string]interface{}{
 		"files_removed":  result.FilesRemoved,
 		"bytes_reclaimed": result.BytesReclaimed,
+	}}
+}
+
+// ---------- messages.send handler ----------
+//
+// This command lets the admin socket send a message as any agent. It
+// bypasses the regular auth/ownership checks because the socket is
+// already admin-privileged (local Unix socket, owned by the synapbus
+// process). Used by the harness shell wrappers (see
+// examples/cold-topic-explainer/wrapper.sh) so Gemini agents can DM
+// each other without implementing the full MCP handshake.
+
+func (s *AdminServer) handleMessagesSend(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		From      string `json:"from"`
+		To        string `json:"to"`
+		Body      string `json:"body"`
+		Subject   string `json:"subject,omitempty"`
+		Priority  int    `json:"priority,omitempty"`
+		ChannelID int64  `json:"channel_id,omitempty"`
+		ReplyTo   int64  `json:"reply_to,omitempty"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.From == "" {
+		return Response{OK: false, Error: "from is required"}
+	}
+	if p.Body == "" {
+		return Response{OK: false, Error: "body is required"}
+	}
+	if p.To == "" && p.ChannelID == 0 {
+		return Response{OK: false, Error: "one of to or channel_id is required"}
+	}
+	if s.services.Messages == nil {
+		return Response{OK: false, Error: "messaging service not configured"}
+	}
+	opts := messaging.SendOptions{
+		Subject:  p.Subject,
+		Priority: p.Priority,
+	}
+	if p.ChannelID > 0 {
+		id := p.ChannelID
+		opts.ChannelID = &id
+	}
+	if p.ReplyTo > 0 {
+		id := p.ReplyTo
+		opts.ReplyTo = &id
+	}
+	msg, err := s.services.Messages.SendMessage(ctx, p.From, p.To, p.Body, opts)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	return Response{OK: true, Data: map[string]any{
+		"message_id":      msg.ID,
+		"conversation_id": msg.ConversationID,
+		"status":          msg.Status,
+		"from":            msg.FromAgent,
+		"to":              msg.ToAgent,
 	}}
 }
 

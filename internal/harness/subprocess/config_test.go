@@ -198,6 +198,64 @@ func TestMaterialise_SanitizesSkillNames(t *testing.T) {
 	}
 }
 
+func TestMaterialise_GeminiMD_WritesSettings(t *testing.T) {
+	workdir := t.TempDir()
+	cfg := subprocess.AgentConfig{
+		GeminiMD: "You are Gemini agent X.\nRespond concisely.",
+		MCPServers: []subprocess.MCPServerSpec{
+			{Name: "synapbus", URL: "http://localhost:18088/mcp"},
+		},
+	}
+	if err := subprocess.MaterialiseAgentConfig(workdir, cfg); err != nil {
+		t.Fatalf("materialise: %v", err)
+	}
+
+	// GEMINI.md
+	got, err := os.ReadFile(filepath.Join(workdir, "GEMINI.md"))
+	if err != nil {
+		t.Fatalf("GEMINI.md: %v", err)
+	}
+	if !strings.Contains(string(got), "Respond concisely.") {
+		t.Errorf("GEMINI.md content = %q", got)
+	}
+
+	// .gemini/settings.json
+	raw, err := os.ReadFile(filepath.Join(workdir, ".gemini", "settings.json"))
+	if err != nil {
+		t.Fatalf("settings.json: %v", err)
+	}
+	var parsed struct {
+		MCPServers map[string]struct {
+			URL string `json:"url,omitempty"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	syn, ok := parsed.MCPServers["synapbus"]
+	if !ok {
+		t.Fatalf("settings.json missing synapbus entry: %s", raw)
+	}
+	if syn.URL != "http://localhost:18088/mcp" {
+		t.Errorf("synapbus url = %q", syn.URL)
+	}
+}
+
+func TestMaterialise_GeminiMD_WithoutMCP_WritesEmptyServers(t *testing.T) {
+	workdir := t.TempDir()
+	cfg := subprocess.AgentConfig{GeminiMD: "You are Gemini."}
+	if err := subprocess.MaterialiseAgentConfig(workdir, cfg); err != nil {
+		t.Fatalf("materialise: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(workdir, ".gemini", "settings.json"))
+	if err != nil {
+		t.Fatalf("settings.json: %v", err)
+	}
+	if !strings.Contains(string(raw), `"mcpServers"`) {
+		t.Errorf("settings.json missing mcpServers key: %s", raw)
+	}
+}
+
 func TestMaterialise_MCPServerWithoutName_Skipped(t *testing.T) {
 	workdir := t.TempDir()
 	cfg := subprocess.AgentConfig{

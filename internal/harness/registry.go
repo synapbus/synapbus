@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/synapbus/synapbus/internal/agents"
@@ -76,18 +77,18 @@ func (r *Registry) Names() []string {
 
 // Resolve picks the right backend for an agent.
 //
-// Default policy:
+// Default policy (in order):
 //  1. If ResolveFn is set, delegate to it.
-//  2. Else if agent has a non-empty HarnessName that is registered,
-//     use it (explicit wins).
-//  3. Else try "k8sjob" if registered and the agent has K8sImage set.
-//  4. Else try "webhook" if registered.
-//  5. Else try "subprocess" if registered.
-//  6. Else ErrNoBackend.
-//
-// Note: the agent-level HarnessName/LocalCommand fields don't yet exist
-// on agents.Agent — Phase 3 adds them via migration 016. Until then the
-// resolver falls back to the legacy "agent has k8s_image" heuristic.
+//  2. Else if agent.HarnessName is set AND registered, use it
+//     (explicit wins over inference — matches the reactor's
+//     agentBackendKind policy).
+//  3. Else if agent has K8sImage set and "k8sjob" is registered.
+//  4. Else if agent has LocalCommand set and "subprocess" is registered.
+//  5. Else if agent has a webhook URL in HarnessConfigJSON and
+//     "webhook" is registered.
+//  6. Else try "k8sjob", "subprocess", "webhook" in that order as a
+//     last-resort fallback.
+//  7. Else ErrNoBackend.
 func (r *Registry) Resolve(agent *agents.Agent) (Harness, error) {
 	if r.ResolveFn != nil {
 		return r.ResolveFn(r, agent)
@@ -95,16 +96,33 @@ func (r *Registry) Resolve(agent *agents.Agent) (Harness, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	if agent != nil && agent.HarnessName != "" {
+		if h, ok := r.byName[agent.HarnessName]; ok {
+			return h, nil
+		}
+	}
 	if agent != nil && agent.K8sImage != "" {
 		if h, ok := r.byName["k8sjob"]; ok {
 			return h, nil
 		}
 	}
-	if h, ok := r.byName["webhook"]; ok {
-		return h, nil
+	if agent != nil && agent.LocalCommand != "" {
+		if h, ok := r.byName["subprocess"]; ok {
+			return h, nil
+		}
 	}
-	if h, ok := r.byName["subprocess"]; ok {
-		return h, nil
+	if agent != nil && agent.HarnessConfigJSON != "" &&
+		strings.Contains(agent.HarnessConfigJSON, "\"url\"") {
+		if h, ok := r.byName["webhook"]; ok {
+			return h, nil
+		}
+	}
+	// Last-resort fallback chain. Matches older behaviour for tests
+	// that register just one harness without setting any hint fields.
+	for _, name := range []string{"k8sjob", "subprocess", "webhook"} {
+		if h, ok := r.byName[name]; ok {
+			return h, nil
+		}
 	}
 	return nil, fmt.Errorf("%w: agent=%q", ErrNoBackend, agentNameOf(agent))
 }

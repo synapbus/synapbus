@@ -544,7 +544,70 @@ func addAdminCommands(rootCmd *cobra.Command) {
 	messagesPurgeCmd.Flags().StringVar(&messagesPurgeAgent, "agent", "", "Delete messages from/to this agent")
 	messagesPurgeCmd.Flags().StringVar(&messagesPurgeChannel, "channel", "", "Delete messages in this channel")
 
-	messagesCmd.AddCommand(messagesListCmd, messagesSearchCmd, messagesPurgeCmd)
+	// `messages send` — bypasses MCP/REST auth; used by harness shell
+	// wrappers and demo scripts to post DMs as a named agent.
+	var (
+		messagesSendFrom     string
+		messagesSendTo       string
+		messagesSendBody     string
+		messagesSendBodyFile string
+		messagesSendSubject  string
+		messagesSendPriority int
+	)
+	messagesSendCmd := &cobra.Command{
+		Use:   "send",
+		Short: "Send a DM as a given agent (admin — bypasses auth)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			body := messagesSendBody
+			if messagesSendBodyFile != "" {
+				b, err := os.ReadFile(messagesSendBodyFile)
+				if err != nil {
+					return fmt.Errorf("read --body-file: %w", err)
+				}
+				body = string(b)
+			} else if body == "" {
+				// Read body from stdin if piped.
+				stat, _ := os.Stdin.Stat()
+				if (stat.Mode() & os.ModeCharDevice) == 0 {
+					b, err := io.ReadAll(os.Stdin)
+					if err != nil {
+						return fmt.Errorf("read stdin: %w", err)
+					}
+					body = string(b)
+				}
+			}
+			if body == "" {
+				return fmt.Errorf("--body, --body-file, or stdin is required")
+			}
+			reqArgs := map[string]any{
+				"from": messagesSendFrom,
+				"to":   messagesSendTo,
+				"body": body,
+			}
+			if messagesSendSubject != "" {
+				reqArgs["subject"] = messagesSendSubject
+			}
+			if messagesSendPriority > 0 {
+				reqArgs["priority"] = messagesSendPriority
+			}
+			resp, err := adminRequest("messages.send", reqArgs)
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	messagesSendCmd.Flags().StringVar(&messagesSendFrom, "from", "", "Sender agent name")
+	messagesSendCmd.Flags().StringVar(&messagesSendTo, "to", "", "Recipient agent name (for DMs)")
+	messagesSendCmd.Flags().StringVar(&messagesSendBody, "body", "", "Message body")
+	messagesSendCmd.Flags().StringVar(&messagesSendBodyFile, "body-file", "", "Read body from file")
+	messagesSendCmd.Flags().StringVar(&messagesSendSubject, "subject", "", "Optional conversation subject")
+	messagesSendCmd.Flags().IntVar(&messagesSendPriority, "priority", 5, "Priority 1-10")
+	_ = messagesSendCmd.MarkFlagRequired("from")
+	_ = messagesSendCmd.MarkFlagRequired("to")
+
+	messagesCmd.AddCommand(messagesListCmd, messagesSearchCmd, messagesPurgeCmd, messagesSendCmd)
 
 	// ----- channels commands -----
 	channelsCmd := &cobra.Command{
