@@ -13,17 +13,32 @@ import (
 
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/dispatcher"
+	"github.com/synapbus/synapbus/internal/harness"
 	k8spkg "github.com/synapbus/synapbus/internal/k8s"
+	"github.com/synapbus/synapbus/internal/messaging"
 	"github.com/synapbus/synapbus/internal/metrics"
+
+	"github.com/google/uuid"
+)
+
+// Backend kinds returned by agentBackendKind. These drive the dispatch
+// fork: k8s uses the fast-return + async poller path; everything else
+// goes through the harness registry in a goroutine.
+const (
+	backendK8s        = "k8s"
+	backendSubprocess = "subprocess"
+	backendWebhook    = "webhook"
+	backendNone       = ""
 )
 
 // Reactor is the reactive agent triggering engine.
 type Reactor struct {
-	store        *Store
-	agentStore   agents.AgentStore
-	runner       k8spkg.JobRunner
-	notifier     FailureNotifier
-	logger       *slog.Logger
+	store      *Store
+	agentStore agents.AgentStore
+	runner     k8spkg.JobRunner
+	registry   *harness.Registry
+	notifier   FailureNotifier
+	logger     *slog.Logger
 }
 
 // FailureNotifier sends system DMs on job failure.
@@ -44,6 +59,13 @@ func New(store *Store, agentStore agents.AgentStore, runner k8spkg.JobRunner, lo
 // SetFailureNotifier sets the notifier for sending failure DMs.
 func (r *Reactor) SetFailureNotifier(n FailureNotifier) {
 	r.notifier = n
+}
+
+// SetHarnessRegistry wires the harness registry used for non-K8s
+// reactive runs (subprocess, webhook). K8s runs continue to go through
+// the existing JobRunner + poller path for restart-safety.
+func (r *Reactor) SetHarnessRegistry(reg *harness.Registry) {
+	r.registry = reg
 }
 
 // Dispatch implements dispatcher.EventDispatcher. Called by MultiDispatcher
@@ -93,31 +115,55 @@ func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event d
 		return nil // Not reactive, skip
 	}
 
-	// 3. Check K8s image configured
-	if agent.K8sImage == "" {
-		r.logger.Warn("reactive agent has no k8s_image configured", "agent", agentName)
-		r.recordSkippedRun(ctx, agentName, event, StatusFailed, "no k8s_image configured")
+	// 3. Pick a backend. K8s agents (k8s_image set) keep the existing
+	// createJob + async poller path for restart safety. Everything else
+	// goes through the harness registry in a goroutine.
+	kind := r.agentBackendKind(agent)
+	switch kind {
+	case backendNone:
+		r.logger.Warn("reactive agent has no backend configured",
+			"agent", agentName,
+			"has_k8s_image", agent.K8sImage != "",
+			"has_local_command", agent.LocalCommand != "",
+			"has_harness_config", agent.HarnessConfigJSON != "",
+		)
+		r.recordSkippedRun(ctx, agentName, event, StatusFailed, "no backend configured (set k8s_image, local_command, or harness_config_json.url)")
 		return nil
-	}
-
-	// 4. Check K8s runner available
-	if !r.runner.IsAvailable() {
-		r.logger.Warn("K8s runner not available for reactive trigger", "agent", agentName)
-		r.recordSkippedRun(ctx, agentName, event, StatusFailed, "K8s runner not available")
-		return nil
+	case backendK8s:
+		// 4. K8s-specific precondition: runner must be available.
+		if !r.runner.IsAvailable() {
+			r.logger.Warn("K8s runner not available for reactive trigger", "agent", agentName)
+			r.recordSkippedRun(ctx, agentName, event, StatusFailed, "K8s runner not available")
+			return nil
+		}
+	case backendSubprocess, backendWebhook:
+		// 4. Harness-specific precondition: registry must be wired and
+		// the resolver must pick the backend we think we should get.
+		if r.registry == nil {
+			r.logger.Warn("harness registry not configured for non-K8s reactive trigger", "agent", agentName, "kind", kind)
+			r.recordSkippedRun(ctx, agentName, event, StatusFailed, "harness registry not wired")
+			return nil
+		}
+		if _, resolveErr := r.registry.Resolve(agent); resolveErr != nil {
+			r.logger.Warn("harness registry cannot resolve backend",
+				"agent", agentName, "kind", kind, "error", resolveErr,
+			)
+			r.recordSkippedRun(ctx, agentName, event, StatusFailed, "harness resolve: "+resolveErr.Error())
+			return nil
+		}
 	}
 
 	// 5. Extract depth from event metadata
 	depth := event.Depth
 
-	// 6. Check trigger depth
+	// 6. Check trigger depth (applies to ALL backends uniformly)
 	if depth >= agent.MaxTriggerDepth {
 		r.logger.Info("trigger depth exceeded", "agent", agentName, "depth", depth, "max", agent.MaxTriggerDepth)
 		r.recordSkippedRun(ctx, agentName, event, StatusDepthExceeded, "")
 		return nil
 	}
 
-	// 7. Check daily budget
+	// 7. Check daily budget (applies to ALL backends uniformly)
 	todayCount, err := r.store.CountTodayRuns(ctx, agentName)
 	if err != nil {
 		return fmt.Errorf("count today runs: %w", err)
@@ -128,7 +174,7 @@ func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event d
 		return nil
 	}
 
-	// 8. Check cooldown
+	// 8. Check cooldown (applies to ALL backends uniformly)
 	lastRun, err := r.store.GetLastRunTime(ctx, agentName)
 	if err != nil {
 		return fmt.Errorf("get last run time: %w", err)
@@ -144,7 +190,7 @@ func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event d
 		}
 	}
 
-	// 9. Check if agent is currently running
+	// 9. Check if agent is currently running (applies to ALL backends)
 	running, err := r.store.IsAgentRunning(ctx, agentName)
 	if err != nil {
 		return fmt.Errorf("check agent running: %w", err)
@@ -156,8 +202,161 @@ func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event d
 		return nil
 	}
 
-	// 10. All checks pass — create K8s Job
-	return r.createJob(ctx, agent, event, depth)
+	// 10. All checks pass — dispatch via the appropriate backend.
+	if kind == backendK8s {
+		return r.createJob(ctx, agent, event, depth)
+	}
+	return r.dispatchHarness(ctx, agent, event, depth)
+}
+
+// agentBackendKind inspects an agent's configuration and picks the
+// single backend it should dispatch through. Priority matches the
+// harness.Registry resolver defaults: k8s_image wins when set,
+// local_command picks subprocess, harness_config_json with a url
+// picks webhook. Returns backendNone when nothing is configured.
+func (r *Reactor) agentBackendKind(agent *agents.Agent) string {
+	if agent == nil {
+		return backendNone
+	}
+	if agent.HarnessName != "" {
+		// Explicit selection wins.
+		switch agent.HarnessName {
+		case "k8sjob":
+			return backendK8s
+		case "subprocess":
+			return backendSubprocess
+		case "webhook":
+			return backendWebhook
+		}
+	}
+	if agent.K8sImage != "" {
+		return backendK8s
+	}
+	if agent.LocalCommand != "" {
+		return backendSubprocess
+	}
+	if agent.HarnessConfigJSON != "" && strings.Contains(agent.HarnessConfigJSON, "\"url\"") {
+		return backendWebhook
+	}
+	return backendNone
+}
+
+// dispatchHarness handles non-K8s reactive runs. It writes the
+// ReactiveRun row synchronously (so callers see status=running on
+// return, matching the K8s path), then spawns a goroutine that blocks
+// on Registry.Execute and writes the terminal status when done.
+func (r *Reactor) dispatchHarness(ctx context.Context, agent *agents.Agent, event dispatcher.MessageEvent, depth int) error {
+	body := event.Body
+	if len(body) > 4096 {
+		body = body[:4096] + " [truncated]"
+	}
+
+	now := time.Now().UTC()
+	run := &ReactiveRun{
+		AgentName:    agent.Name,
+		TriggerEvent: event.EventType,
+		TriggerDepth: depth,
+		TriggerFrom:  event.FromAgent,
+		Status:       StatusRunning,
+		StartedAt:    &now,
+	}
+	if event.MessageID > 0 {
+		run.TriggerMessageID = &event.MessageID
+	}
+
+	runID, err := r.store.InsertRun(ctx, run)
+	if err != nil {
+		return fmt.Errorf("insert reactive run: %w", err)
+	}
+
+	_ = r.agentStore.SetPendingWork(ctx, agent.Name, false)
+	metrics.ReactiveTriggersTotal.WithLabelValues(agent.Name, StatusRunning).Inc()
+	metrics.ReactiveAgentState.WithLabelValues(agent.Name).Set(1)
+
+	r.logger.Info("reactive harness dispatch",
+		"agent", agent.Name,
+		"backend", r.agentBackendKind(agent),
+		"trigger_from", event.FromAgent,
+		"trigger_event", event.EventType,
+		"depth", depth,
+		"run_id", runID,
+	)
+
+	req := &harness.ExecRequest{
+		RunID:     uuid.NewString(),
+		AgentName: agent.Name,
+		Agent:     agent,
+		Message: &messaging.Message{
+			ID:        event.MessageID,
+			FromAgent: event.FromAgent,
+			ToAgent:   event.ToAgent,
+			Body:      body,
+		},
+		Env: map[string]string{
+			"SYNAPBUS_TRIGGER_DEPTH": fmt.Sprintf("%d", depth),
+			"SYNAPBUS_EVENT":         event.EventType,
+			"SYNAPBUS_FROM_AGENT":    event.FromAgent,
+		},
+	}
+
+	// Block on a detached context so a cancelled incoming request
+	// does not kill in-flight work. Callers get a fast return above.
+	go r.runHarness(runID, agent, event, req)
+	return nil
+}
+
+// runHarness is the goroutine body that actually blocks on the
+// harness. It MUST update the reactive_runs row on every exit path.
+func (r *Reactor) runHarness(runID int64, agent *agents.Agent, event dispatcher.MessageEvent, req *harness.ExecRequest) {
+	// Detached context — independent of the caller's Dispatch ctx so
+	// the harness can outlive a short-lived HTTP handler. We still
+	// propagate a generous timeout as a safety net.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Hour)
+	defer cancel()
+
+	startedAt := time.Now().UTC()
+
+	res, err := r.registry.Execute(ctx, agent, req)
+	completedAt := time.Now().UTC()
+	durationMs := completedAt.Sub(startedAt).Milliseconds()
+
+	status := StatusSucceeded
+	errorLog := ""
+	if err != nil {
+		status = StatusFailed
+		errorLog = err.Error()
+	} else if res != nil && res.ExitCode != 0 {
+		status = StatusFailed
+		errorLog = res.Logs
+		const logsCap = 8 * 1024
+		if len(errorLog) > logsCap {
+			errorLog = errorLog[len(errorLog)-logsCap:]
+		}
+	}
+
+	_ = r.store.CompleteRun(ctx, runID, status, errorLog, completedAt)
+
+	// Metrics — mirror what the poller does for K8s runs.
+	metrics.ReactiveAgentState.WithLabelValues(agent.Name).Set(0)
+	metrics.ReactiveRunDuration.WithLabelValues(agent.Name).Observe(float64(durationMs) / 1000.0)
+	metrics.ReactiveTriggersTotal.WithLabelValues(agent.Name, status).Inc()
+	todayCount, _ := r.store.CountTodayRuns(ctx, agent.Name)
+	metrics.ReactiveBudgetUsed.WithLabelValues(agent.Name).Set(float64(todayCount))
+
+	if status == StatusFailed {
+		r.logger.Warn("reactive harness run failed",
+			"agent", agent.Name,
+			"run_id", runID,
+			"error", errorLog,
+		)
+		r.notifyFailure(context.Background(), agent, event, durationMs, errorLog)
+	} else {
+		r.logger.Info("reactive harness run succeeded",
+			"agent", agent.Name,
+			"run_id", runID,
+			"duration_ms", durationMs,
+		)
+	}
 }
 
 // createJob creates a K8s Job for the reactive trigger.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/dispatcher"
+	"github.com/synapbus/synapbus/internal/harness"
+	"github.com/synapbus/synapbus/internal/harness/stub"
 	k8spkg "github.com/synapbus/synapbus/internal/k8s"
 
 	_ "modernc.org/sqlite"
@@ -24,6 +27,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	// modernc.org/sqlite gives every pool connection its own fresh
+	// :memory: database, which breaks tests that spawn goroutines
+	// (harness runs) alongside the main test goroutine. Pin to one
+	// connection so every query sees the same schema and rows.
+	db.SetMaxOpenConns(1)
 
 	// Create minimal schema
 	schema := `
@@ -84,6 +92,20 @@ func insertTestAgent(t *testing.T, db *sql.DB, name, triggerMode, image string, 
 	)
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)
+	}
+}
+
+// insertSubprocessAgent creates a reactive agent backed by a local
+// command instead of a K8s image.
+func insertSubprocessAgent(t *testing.T, db *sql.DB, name, localCommand string, cooldown, budget, maxDepth int) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO agents (name, display_name, type, owner_id, trigger_mode, cooldown_seconds, daily_trigger_budget, max_trigger_depth, k8s_resource_preset, local_command)
+		 VALUES (?, ?, 'ai', 1, 'reactive', ?, ?, ?, 'default', ?)`,
+		name, name, cooldown, budget, maxDepth, localCommand,
+	)
+	if err != nil {
+		t.Fatalf("insert subprocess agent: %v", err)
 	}
 }
 
@@ -150,8 +172,8 @@ func TestReactorNoK8sImage(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 failed run for agent with no image, got %d", len(runs))
 	}
-	if runs[0].ErrorLog != "no k8s_image configured" {
-		t.Errorf("expected 'no k8s_image configured' error, got: %s", runs[0].ErrorLog)
+	if !strings.Contains(runs[0].ErrorLog, "no backend configured") {
+		t.Errorf("expected 'no backend configured' error, got: %s", runs[0].ErrorLog)
 	}
 }
 
@@ -407,6 +429,275 @@ func TestReactorSuccessfulTrigger(t *testing.T) {
 	if runner.lastEnv["AGENT_GIT_REPO"] != "Dumbris/test-agent" {
 		t.Errorf("expected AGENT_GIT_REPO from k8s_env_json, got %s", runner.lastEnv["AGENT_GIT_REPO"])
 	}
+}
+
+// --- subprocess/harness path tests ---------------------------------------
+
+// newHarnessReactor wires a reactor with a registry that dispatches to
+// the provided stub harness under the "subprocess" name. The NoopRunner
+// ensures the K8s path is skipped for agents without a k8s_image.
+func newHarnessReactor(t *testing.T, db *sql.DB, stubHarness *stub.Harness) *Reactor {
+	t.Helper()
+	store := NewStore(db)
+	agentStore := agents.NewSQLiteAgentStore(db)
+	reactor := New(store, agentStore, k8spkg.NewNoopRunner(), slog.Default())
+	reg := harness.NewRegistry()
+	reg.Register(stubHarness)
+	reactor.SetHarnessRegistry(reg)
+	return reactor
+}
+
+// waitForRun polls the store until a run in the given status exists or
+// the deadline expires. Subprocess dispatches run in a goroutine so
+// tests need to wait a bit for the terminal status.
+func waitForRun(t *testing.T, store *Store, agentName, status string) *ReactiveRun {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, _, err := store.ListRuns(context.Background(), agentName, status, 5, 0)
+		if err == nil && len(runs) > 0 {
+			return runs[0]
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for run with status=%s for agent=%s", status, agentName)
+	return nil
+}
+
+func TestReactorSubprocess_SuccessFromMention(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	insertSubprocessAgent(t, db, "local-agent", `["sh","-c","true"]`, 0, 8, 5)
+
+	s := stub.New()
+	s.NameStr = "subprocess"
+	s.Result = &harness.ExecResult{ExitCode: 0, Logs: "ok"}
+	reactor := newHarnessReactor(t, db, s)
+
+	event := dispatcher.MessageEvent{
+		EventType:       "message.mentioned",
+		MessageID:       42,
+		FromAgent:       "algis",
+		Body:            "@local-agent please help",
+		MentionedAgents: []string{"local-agent"},
+	}
+	if err := reactor.Dispatch(context.Background(), event); err != nil {
+		t.Fatalf("Dispatch err = %v", err)
+	}
+
+	run := waitForRun(t, reactor.store, "local-agent", StatusSucceeded)
+	if run.TriggerEvent != "message.mentioned" {
+		t.Errorf("trigger_event = %q", run.TriggerEvent)
+	}
+	if run.TriggerFrom != "algis" {
+		t.Errorf("trigger_from = %q", run.TriggerFrom)
+	}
+	if len(s.Calls) != 1 {
+		t.Fatalf("stub got %d calls, want 1", len(s.Calls))
+	}
+	call := s.Calls[0]
+	if call.Agent == nil || call.Agent.Name != "local-agent" {
+		t.Errorf("stub call agent = %+v", call.Agent)
+	}
+	if call.Env["SYNAPBUS_TRIGGER_DEPTH"] != "0" {
+		t.Errorf("trigger depth env = %q", call.Env["SYNAPBUS_TRIGGER_DEPTH"])
+	}
+	if call.Env["SYNAPBUS_FROM_AGENT"] != "algis" {
+		t.Errorf("from_agent env = %q", call.Env["SYNAPBUS_FROM_AGENT"])
+	}
+	if call.Message == nil || call.Message.ID != 42 {
+		t.Errorf("message = %+v", call.Message)
+	}
+}
+
+func TestReactorSubprocess_FailureRecordedAndDMSent(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	insertSubprocessAgent(t, db, "crash-agent", `["sh","-c","false"]`, 0, 8, 5)
+	// Insert a human owner so notifyFailure can resolve the recipient.
+	_, _ = db.Exec(`INSERT INTO agents (name, display_name, type, owner_id, trigger_mode, k8s_resource_preset)
+		VALUES ('algis', 'algis', 'human', 1, 'passive', 'default')`)
+
+	s := stub.New()
+	s.NameStr = "subprocess"
+	s.Result = &harness.ExecResult{ExitCode: 7, Logs: "bad"}
+	reactor := newHarnessReactor(t, db, s)
+
+	notifier := &fakeNotifier{}
+	reactor.SetFailureNotifier(notifier)
+
+	event := dispatcher.MessageEvent{
+		EventType: "message.received",
+		MessageID: 1,
+		FromAgent: "algis",
+		ToAgent:   "crash-agent",
+		Body:      "work",
+	}
+	_ = reactor.Dispatch(context.Background(), event)
+
+	run := waitForRun(t, reactor.store, "crash-agent", StatusFailed)
+	if run.ErrorLog == "" {
+		t.Error("expected error log on failed run")
+	}
+	if notifier.calls != 1 {
+		t.Errorf("notifier calls = %d, want 1", notifier.calls)
+	}
+}
+
+func TestReactorSubprocess_DepthExceededSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	insertSubprocessAgent(t, db, "deep-local", `["sh","-c","true"]`, 0, 8, 3)
+
+	s := stub.New()
+	s.NameStr = "subprocess"
+	reactor := newHarnessReactor(t, db, s)
+
+	event := dispatcher.MessageEvent{
+		EventType: "message.received",
+		MessageID: 1,
+		FromAgent: "algis",
+		ToAgent:   "deep-local",
+		Depth:     3, // at limit
+	}
+	_ = reactor.Dispatch(context.Background(), event)
+
+	runs, _, _ := reactor.store.ListRuns(context.Background(), "deep-local", StatusDepthExceeded, 5, 0)
+	if len(runs) != 1 {
+		t.Fatalf("expected depth_exceeded run, got %d", len(runs))
+	}
+	if len(s.Calls) != 0 {
+		t.Errorf("harness should not be called when depth exceeded (calls=%d)", len(s.Calls))
+	}
+}
+
+func TestReactorSubprocess_BudgetExhaustedSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	insertSubprocessAgent(t, db, "budget-local", `["sh","-c","true"]`, 0, 1, 5)
+
+	// Seed one completed run today to exhaust the daily budget (=1).
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.Exec(`INSERT INTO reactive_runs (agent_name, trigger_event, trigger_depth, trigger_from, status, created_at)
+		VALUES ('budget-local', 'message.received', 0, 'algis', 'succeeded', ?)`, now)
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	s := stub.New()
+	s.NameStr = "subprocess"
+	reactor := newHarnessReactor(t, db, s)
+
+	_ = reactor.Dispatch(context.Background(), dispatcher.MessageEvent{
+		EventType: "message.received",
+		MessageID: 1,
+		FromAgent: "algis",
+		ToAgent:   "budget-local",
+	})
+
+	runs, _, _ := reactor.store.ListRuns(context.Background(), "budget-local", StatusBudgetExhausted, 5, 0)
+	if len(runs) != 1 {
+		t.Fatalf("expected budget_exhausted run, got %d", len(runs))
+	}
+	if len(s.Calls) != 0 {
+		t.Errorf("harness called despite budget exhaustion")
+	}
+}
+
+func TestReactorSubprocess_CooldownSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	insertSubprocessAgent(t, db, "cool-local", `["sh","-c","true"]`, 3600, 8, 5)
+
+	// Seed a recent completed run so cooldown applies.
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, _ = db.Exec(`INSERT INTO reactive_runs (agent_name, trigger_event, trigger_depth, trigger_from, status, created_at)
+		VALUES ('cool-local', 'message.received', 0, 'algis', 'succeeded', ?)`, now)
+
+	s := stub.New()
+	s.NameStr = "subprocess"
+	reactor := newHarnessReactor(t, db, s)
+
+	_ = reactor.Dispatch(context.Background(), dispatcher.MessageEvent{
+		EventType: "message.received",
+		MessageID: 1,
+		FromAgent: "algis",
+		ToAgent:   "cool-local",
+	})
+
+	runs, _, _ := reactor.store.ListRuns(context.Background(), "cool-local", StatusCooldownSkipped, 5, 0)
+	if len(runs) != 1 {
+		t.Fatalf("expected cooldown_skipped run, got %d", len(runs))
+	}
+	if len(s.Calls) != 0 {
+		t.Errorf("harness called despite cooldown")
+	}
+}
+
+func TestReactorSubprocess_AlreadyRunningQueued(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	insertSubprocessAgent(t, db, "busy-local", `["sh","-c","true"]`, 0, 8, 5)
+
+	// Seed a running run so the already-running check fires.
+	_, _ = db.Exec(`INSERT INTO reactive_runs (agent_name, trigger_event, trigger_depth, trigger_from, status, started_at, created_at)
+		VALUES ('busy-local', 'message.received', 0, 'algis', 'running', datetime('now'), datetime('now'))`)
+
+	s := stub.New()
+	s.NameStr = "subprocess"
+	reactor := newHarnessReactor(t, db, s)
+
+	_ = reactor.Dispatch(context.Background(), dispatcher.MessageEvent{
+		EventType: "message.received",
+		MessageID: 1,
+		FromAgent: "algis",
+		ToAgent:   "busy-local",
+	})
+
+	runs, _, _ := reactor.store.ListRuns(context.Background(), "busy-local", StatusQueued, 5, 0)
+	if len(runs) != 1 {
+		t.Fatalf("expected queued run, got %d", len(runs))
+	}
+	if len(s.Calls) != 0 {
+		t.Errorf("harness called despite already-running")
+	}
+}
+
+func TestReactorSubprocess_NoBackendFailsCleanly(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	// Reactive agent with no k8s_image, no local_command, no harness config.
+	_, _ = db.Exec(`INSERT INTO agents (name, display_name, type, owner_id, trigger_mode,
+		cooldown_seconds, daily_trigger_budget, max_trigger_depth, k8s_resource_preset)
+		VALUES ('orphan', 'orphan', 'ai', 1, 'reactive', 0, 8, 5, 'default')`)
+
+	reactor := newHarnessReactor(t, db, stub.New())
+	_ = reactor.Dispatch(context.Background(), dispatcher.MessageEvent{
+		EventType: "message.received",
+		MessageID: 1,
+		FromAgent: "algis",
+		ToAgent:   "orphan",
+	})
+
+	runs, _, _ := reactor.store.ListRuns(context.Background(), "orphan", StatusFailed, 5, 0)
+	if len(runs) != 1 {
+		t.Fatalf("expected failed run for orphan agent, got %d", len(runs))
+	}
+	if !strings.Contains(runs[0].ErrorLog, "no backend configured") {
+		t.Errorf("error_log = %q", runs[0].ErrorLog)
+	}
+}
+
+// fakeNotifier captures NotifyFailure calls.
+type fakeNotifier struct {
+	calls int
+	last  string
+}
+
+func (f *fakeNotifier) NotifyFailure(_ context.Context, _, _, _, _ string, _ int64, errorSummary string) error {
+	f.calls++
+	f.last = errorSummary
+	return nil
 }
 
 // fakeRunner is a test double for k8spkg.JobRunner.

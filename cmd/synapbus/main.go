@@ -44,6 +44,11 @@ import (
 	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/messaging"
 	prommetrics "github.com/synapbus/synapbus/internal/metrics"
+	"github.com/synapbus/synapbus/internal/harness"
+	"github.com/synapbus/synapbus/internal/harness/k8sjob"
+	"github.com/synapbus/synapbus/internal/harness/runs"
+	"github.com/synapbus/synapbus/internal/harness/subprocess"
+	"github.com/synapbus/synapbus/internal/harness/webhook"
 	"github.com/synapbus/synapbus/internal/observability"
 	"github.com/synapbus/synapbus/internal/reactions"
 	"github.com/synapbus/synapbus/internal/search"
@@ -493,6 +498,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 	reactorEngine := reactorpkg.New(reactorStore, agentStore, k8sRunner, slog.Default())
 	reactorNotifier := reactorpkg.NewDMFailureNotifier(msgService)
 	reactorEngine.SetFailureNotifier(reactorNotifier)
+
+	// Harness registry — single seam for non-K8s reactive runs and
+	// for any caller (admin CLI, MCP, future features) that wants to
+	// dispatch work to an agent's configured backend. K8s agents keep
+	// going through the existing createJob + poller path; subprocess
+	// and webhook agents go through Registry.Execute.
+	harnessRegistry := harness.NewRegistry()
+	harnessRegistry.Register(k8sjob.New(k8sRunner, nil, slog.Default()))
+	harnessRegistry.Register(subprocess.New(subprocess.Config{
+		BaseDir: filepath.Join(dataDir, "harness", "subprocess"),
+	}, slog.Default()))
+	harnessRegistry.Register(webhook.New(webhook.Config{}, slog.Default()))
+	harnessRunsStore := runs.New(db.DB, slog.Default())
+	harnessRegistry.Observer = harnessRunsStore
+	reactorEngine.SetHarnessRegistry(harnessRegistry)
+	slog.Info("harness registry configured",
+		"backends", harnessRegistry.Names(),
+	)
 
 	// Create event dispatcher (fans out to webhooks + K8s + reactor)
 	eventDispatcher := dispatcher.NewMultiDispatcher(slog.Default(), deliveryEngine, k8sDispatcher, reactorEngine)
