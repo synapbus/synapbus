@@ -40,6 +40,32 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 
 # --- build -------------------------------------------------------------
+# Rebuild the embedded Svelte SPA when web sources are newer than the
+# baked dist. Without this, a stale internal/web/dist gets compiled
+# into the binary and the Web UI loads a blank page.
+if [ -d "$REPO_ROOT/web/node_modules" ]; then
+    need_web_build=0
+    if [ ! -d "$REPO_ROOT/internal/web/dist" ]; then
+        need_web_build=1
+    else
+        # Any .svelte/.ts source newer than the embedded index.html?
+        newest_src=$(find "$REPO_ROOT/web/src" -type f \( -name '*.svelte' -o -name '*.ts' -o -name '*.css' \) -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)
+        embedded_index="$REPO_ROOT/internal/web/dist/index.html"
+        if [ -n "$newest_src" ] && [ "$newest_src" -nt "$embedded_index" ]; then
+            need_web_build=1
+        fi
+    fi
+    if [ "$need_web_build" = 1 ]; then
+        say "rebuilding Svelte SPA (sources newer than embedded dist)"
+        (cd "$REPO_ROOT/web" && ./node_modules/.bin/vite build)
+        rm -rf "$REPO_ROOT/internal/web/dist"
+        cp -r "$REPO_ROOT/web/build" "$REPO_ROOT/internal/web/dist"
+    fi
+else
+    say "note: web/node_modules missing — using whatever internal/web/dist is embedded"
+    say "      (run 'make web' once from the repo root to bootstrap)"
+fi
+
 say "building synapbus binary..."
 mkdir -p "$BIN_DIR"
 (cd "$REPO_ROOT" && go build -o "$BIN" ./cmd/synapbus)

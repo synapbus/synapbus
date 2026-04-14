@@ -3,6 +3,7 @@ package observability_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/synapbus/synapbus/internal/observability"
 	"go.opentelemetry.io/otel"
@@ -56,6 +57,52 @@ func TestInit_DisabledIsNoopShutdown(t *testing.T) {
 	if err := shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown err = %v", err)
 	}
+}
+
+// TestInit_EnabledResourceMerge is a regression test for a schema-URL
+// conflict: semconv/v1.21 + resource.Default() (which can be 1.26 in
+// newer SDKs) used to fail resource.Merge with "conflicting Schema URL".
+// Now we use resource.NewSchemaless so the merge is always accepted.
+// Points at a dead endpoint so the OTLP client never sends anything.
+func TestInit_EnabledSucceeds(t *testing.T) {
+	cfg := observability.Config{
+		Enabled:        true,
+		Endpoint:       "127.0.0.1:1", // unroutable; Init must still return successfully
+		Insecure:       true,
+		ServiceName:    "synapbus-test",
+		ServiceVersion: "0.0.0-test",
+	}
+	shutdown, err := observability.Init(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("Init err = %v", err)
+	}
+	if shutdown == nil {
+		t.Fatal("shutdown is nil")
+	}
+	// Shutdown is best-effort and may legitimately fail to export
+	// pending spans against a dead endpoint; surface it as a log not
+	// a test failure.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := shutdown(shutdownCtx); err != nil {
+		t.Logf("shutdown non-fatal: %v", err)
+	}
+}
+
+func TestInit_EnabledWithNoVersion(t *testing.T) {
+	// ServiceVersion omitted — the attribute list must not include an
+	// empty string for service.version.
+	cfg := observability.Config{
+		Enabled:     true,
+		Endpoint:    "127.0.0.1:1",
+		Insecure:    true,
+		ServiceName: "synapbus-test",
+	}
+	shutdown, err := observability.Init(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("Init err = %v", err)
+	}
+	_ = shutdown(context.Background())
 }
 
 func TestInjectTraceContext_NoSpan(t *testing.T) {

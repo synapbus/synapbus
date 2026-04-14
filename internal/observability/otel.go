@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
@@ -105,12 +106,19 @@ func Init(ctx context.Context, cfg Config, logger *slog.Logger) (func(context.Co
 		return nil, fmt.Errorf("observability: create OTLP HTTP exporter: %w", err)
 	}
 
+	// Merge our per-run attributes into the SDK's default resource.
+	// NewSchemaless avoids embedding our own schema URL, so the merge
+	// never conflicts with whatever version resource.Default() uses
+	// (which varies between otel/sdk releases — 1.21, 1.26, …).
+	attrs := []attribute.KeyValue{
+		semconv.ServiceName(cfg.ServiceName),
+	}
+	if cfg.ServiceVersion != "" {
+		attrs = append(attrs, semconv.ServiceVersion(cfg.ServiceVersion))
+	}
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(semconv.SchemaURL,
-			semconv.ServiceName(cfg.ServiceName),
-			semconv.ServiceVersion(cfg.ServiceVersion),
-		),
+		resource.NewSchemaless(attrs...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("observability: build resource: %w", err)
