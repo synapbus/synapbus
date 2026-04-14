@@ -32,7 +32,7 @@ description: "Task list for Dynamic Agent Spawning"
 **Purpose**: Create new packages and migration files; wire through the build. No behavior yet.
 
 - [ ] T001 Create empty Go packages with `doc.go` files at `internal/goals/doc.go`, `internal/tasks/doc.go`, `internal/trust/doc.go`, `internal/secrets/doc.go`
-- [ ] T002 [P] Create migration files (empty DDL, just table shells per data-model.md) at `internal/storage/schema/021_goals_tasks.sql`, `internal/storage/schema/022_agent_proposals.sql`, `internal/storage/schema/023_agent_trust_model.sql`, `internal/storage/schema/024_secrets.sql`, `internal/storage/schema/025_harness_runs_task_id.sql`
+- [X] T002 [P] Create migration files (empty DDL, just table shells per data-model.md) at `internal/storage/schema/021_goals_tasks.sql`, `internal/storage/schema/022_agent_proposals.sql`, `internal/storage/schema/023_agent_trust_model.sql`, `internal/storage/schema/024_secrets.sql`, `internal/storage/schema/025_harness_runs_task_id.sql` — **note**: table renamed from `tasks` to `goal_tasks` (legacy `tasks` table exists from migration 001 for channel task auctions)
 - [ ] T003 [P] Create example scaffolding at `examples/doc-gardener/` mirroring `examples/cold-topic-explainer/` — copy `start.sh`, `stop.sh`, `run_task.sh`, `wrapper.sh`, `README.md` with doc-gardener placeholders
 - [ ] T004 [P] Add `golang.org/x/crypto/nacl/secretbox` to `go.mod` via `go get` and verify the pure-Go build still works (`CGO_ENABLED=0 go build ./...`)
 - [ ] T005 Create `specs/018-dynamic-agent-spawning/BUILD_NOTES.md` with the developer runbook (build commands, test commands, example commands) for the whole feature
@@ -43,11 +43,11 @@ description: "Task list for Dynamic Agent Spawning"
 
 **Purpose**: Migrations, base types, and the trust primitive that every user story depends on.
 
-- [ ] T010 Fill migration 021 DDL (goals + tasks tables, indexes, state CHECK constraints) in `internal/storage/schema/021_goals_tasks.sql` per data-model.md
-- [ ] T011 Fill migration 022 DDL (agent_proposals + resource_requests tables) in `internal/storage/schema/022_agent_proposals.sql` per data-model.md
-- [ ] T012 Fill migration 023 DDL (drop+recreate trust table; ALTER agents with config_hash/parent_agent_id/spawn_depth/system_prompt/autonomy_tier/tool_scope_json/quarantined_at; reputation_evidence table) in `internal/storage/schema/023_agent_trust_model.sql`
-- [ ] T013 Fill migration 024 DDL (secrets table with nonce||ciphertext BLOB, unique-index-where-not-revoked) in `internal/storage/schema/024_secrets.sql`
-- [ ] T014 Fill migration 025 DDL (ALTER harness_runs ADD task_id + index) in `internal/storage/schema/025_harness_runs_task_id.sql`
+- [X] T010 Fill migration 021 DDL (goals + goal_tasks tables, indexes, state CHECK constraints)
+- [X] T011 Fill migration 022 DDL (agent_proposals + resource_requests tables)
+- [X] T012 Fill migration 023 DDL — **revised**: keep existing agent_trust table intact (wired to reactions), only ALTER agents + CREATE reputation_evidence
+- [X] T013 Fill migration 024 DDL (secrets table)
+- [X] T014 Fill migration 025 DDL (harness_runs.task_id)
 - [ ] T015 [P] Write data-migration Go code that extracts `system_prompt` from existing `harness_config_json` for pre-existing agents, idempotent, in `internal/storage/migrations_data.go`
 - [ ] T016 [P] Write data-migration Go code that computes `config_hash` for every existing agent and backfills the column in `internal/storage/migrations_data.go`
 - [ ] T017 Implement `trust.ConfigHash(agent)` canonical SHA-256 hashing (sorted-keys JSON) in `internal/trust/hash.go` with table-driven unit tests in `internal/trust/hash_test.go` verifying stability across shuffled input arrays

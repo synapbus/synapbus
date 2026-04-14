@@ -46,4 +46,14 @@ type Agent struct {
 	HarnessName       string `json:"harness_name,omitempty"`        // explicit backend; empty = auto-resolve
 	LocalCommand      string `json:"local_command,omitempty"`       // JSON-encoded argv for subprocess backend
 	HarnessConfigJSON string `json:"harness_config_json,omitempty"` // opaque per-backend config
+
+	// Dynamic-spawning trust fields (migration 023).
+	ConfigHash       string     `json:"config_hash,omitempty"`
+	ParentAgentID    *int64     `json:"parent_agent_id,omitempty"`
+	SpawnDepth       int        `json:"spawn_depth"`
+	SystemPrompt     string     `json:"system_prompt,omitempty"`
+	AutonomyTier     string     `json:"autonomy_tier,omitempty"`
+	ToolScopeJSON    string     `json:"tool_scope_json,omitempty"`
+	QuarantinedAt    *time.Time `json:"quarantined_at,omitempty"`
+	QuarantineReason string     `json:"quarantine_reason,omitempty"`
 }

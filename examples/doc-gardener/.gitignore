@@ -1,0 +1,6 @@
+bin/
+data/
+synapbus.log
+.synapbus.pid
+.last_goal_id
+report.html
