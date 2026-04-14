@@ -344,8 +344,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	// Leave IssuerURL empty for localhost — metadata handler falls back to r.Host
 
-	userStore := auth.NewSQLiteUserStore(db.DB, authCfg.BcryptCost)
-	sessionStore := auth.NewSQLiteSessionStore(db.DB)
+	userStore := auth.NewSQLiteUserStoreWithRead(db.DB, db.QueryDB(), authCfg.BcryptCost)
+	sessionStore := auth.NewSQLiteSessionStoreWithRead(db.DB, db.QueryDB())
 	clientStore := auth.NewSQLiteClientStore(db.DB, authCfg.BcryptCost)
 	fositeStore := auth.NewFositeStore(db.DB, authCfg.BcryptCost)
 	oauthProvider := auth.NewOAuthProvider(authCfg, fositeStore)

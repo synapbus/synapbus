@@ -27,17 +27,37 @@ type UserStore interface {
 }
 
 // SQLiteUserStore implements UserStore using SQLite.
+//
+// Splits reads (GetUserByID, GetUserByUsername, etc.) onto a separate
+// read pool when one is configured. The write pool has
+// MaxOpenConns=1, so every authenticated HTTP request — which does a
+// GetSession + GetUserByID on the hot path — would otherwise serialize
+// behind long-running reactor writes and wedge the UI.
 type SQLiteUserStore struct {
 	db         *sql.DB
+	readDB     *sql.DB
 	bcryptCost int
 }
 
-// NewSQLiteUserStore creates a new SQLite-backed user store.
+// NewSQLiteUserStore creates a new SQLite-backed user store using a
+// single handle for reads and writes (pre-spec-018 behaviour).
 func NewSQLiteUserStore(db *sql.DB, bcryptCost int) *SQLiteUserStore {
 	if bcryptCost < 10 {
 		bcryptCost = 12
 	}
-	return &SQLiteUserStore{db: db, bcryptCost: bcryptCost}
+	return &SQLiteUserStore{db: db, readDB: db, bcryptCost: bcryptCost}
+}
+
+// NewSQLiteUserStoreWithRead creates a UserStore that routes SELECTs
+// through readDB while using writeDB for inserts / updates.
+func NewSQLiteUserStoreWithRead(writeDB, readDB *sql.DB, bcryptCost int) *SQLiteUserStore {
+	if readDB == nil {
+		readDB = writeDB
+	}
+	if bcryptCost < 10 {
+		bcryptCost = 12
+	}
+	return &SQLiteUserStore{db: writeDB, readDB: readDB, bcryptCost: bcryptCost}
 }
 
 // CreateUser creates a new user with a bcrypt-hashed password.
@@ -100,10 +120,11 @@ func (s *SQLiteUserStore) CreateUser(ctx context.Context, username, password, di
 	}, nil
 }
 
-// GetUserByID retrieves a user by their ID.
+// GetUserByID retrieves a user by their ID. Uses the read pool so
+// RequireSession middleware calls don't contend with reactor writes.
 func (s *SQLiteUserStore) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	user := &User{}
-	err := s.db.QueryRowContext(ctx,
+	err := s.readDB.QueryRowContext(ctx,
 		`SELECT id, username, password_hash, display_name, role, created_at, updated_at
 		 FROM users WHERE id = ?`, id,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName,
@@ -124,7 +145,7 @@ func (s *SQLiteUserStore) GetUserByEmail(ctx context.Context, email string) (*Us
 		return nil, ErrUserNotFound
 	}
 	user := &User{}
-	err := s.db.QueryRowContext(ctx,
+	err := s.readDB.QueryRowContext(ctx,
 		`SELECT id, username, password_hash, display_name, role, created_at, updated_at
 		 FROM users WHERE email = ?`, email,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName,
@@ -147,10 +168,10 @@ func (s *SQLiteUserStore) SetEmail(ctx context.Context, userID int64, email stri
 	return err
 }
 
-// GetUserByUsername retrieves a user by their username.
+// GetUserByUsername retrieves a user by their username. Uses the read pool.
 func (s *SQLiteUserStore) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	user := &User{}
-	err := s.db.QueryRowContext(ctx,
+	err := s.readDB.QueryRowContext(ctx,
 		`SELECT id, username, password_hash, display_name, role, created_at, updated_at
 		 FROM users WHERE username = ?`, username,
 	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName,
