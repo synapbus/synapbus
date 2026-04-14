@@ -206,6 +206,16 @@ func NewMCPServer(
 	return s
 }
 
+// WireGoalsTools registers the spec-018 tool surface (create_goal,
+// propose_task_tree, propose_agent, claim_task, request_resource,
+// list_resources) on the MCP server. Must be called after NewMCPServer.
+func (s *MCPServer) WireGoalsTools(r *GoalsToolRegistrar) {
+	if r == nil || s.mcpServer == nil {
+		return
+	}
+	r.RegisterAllOnServer(s.mcpServer)
+}
+
 // SetQueryExecutor sets the SQL query executor for agent queries via the execute tool.
 func (s *MCPServer) SetQueryExecutor(exec *agentquery.Executor) {
 	if s.hybridRegistrar != nil {

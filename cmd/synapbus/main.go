@@ -569,6 +569,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	mcpSrv.SetMarketplaceService(marketplaceSvc)
 	slog.Info("agent marketplace service initialized (spec 016)")
 
+	// Wire the spec-018 tool surface (dynamic agent spawning). Only
+	// registered if the goals/tasks services are up — which they
+	// always are after the block above.
+	goalsToolReg := mcpserver.NewGoalsToolRegistrar(
+		goalsService,
+		goalTasksService,
+		agentService,
+		secretsStore,
+		db.DB,
+	)
+	mcpSrv.WireGoalsTools(goalsToolReg)
+	slog.Info("spec-018 MCP tools wired (create_goal, propose_task_tree, propose_agent, claim_task, request_resource, list_resources)")
+
 	// Set up SQL query executor for agents (uses read pool if available)
 	queryDB := db.QueryDB()
 	queryExec := agentquery.New(queryDB, slog.Default())

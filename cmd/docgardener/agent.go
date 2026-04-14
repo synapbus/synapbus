@@ -175,11 +175,22 @@ func (a *agentRunner) handleCoordinatorKickoff(ctx context.Context) (string, err
 		return "", err
 	}
 
-	// Task tree.
+	// Task tree — prefer a real Gemini-generated decomposition when
+	// SYNAPBUS_GEMINI_MODEL is set; fall back to the fixed template
+	// on any failure so the demo works offline.
+	tree := buildTaskTree()
+	if llmTree, llmErr := geminiTaskTree(ctx, logger, a.msg.Body); llmErr == nil && llmTree != nil {
+		tree = *llmTree
+		a.postSystemMessage(ctx, g.ChannelID,
+			fmt.Sprintf("🤖 Coordinator invoked Gemini (%s) and materialized an LLM-generated task tree with %d leaves.",
+				os.Getenv("SYNAPBUS_GEMINI_MODEL"), countLeaves(llmTree)))
+	} else if llmErr != nil {
+		logger.Info("gemini coordinator skipped", "reason", llmErr)
+	}
 	rootID, allIDs, err := a.tasks.CreateTree(ctx, goaltasks.CreateTreeInput{
 		GoalID:         g.ID,
 		CreatedByAgent: &coordID,
-		Root:           buildTaskTree(),
+		Root:           tree,
 		InitialStatus:  goaltasks.StatusApproved,
 		DefaultBilling: "doc-gardener",
 	})
