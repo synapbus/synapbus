@@ -64,6 +64,7 @@
 	const adminLinks = [
 		{ href: '/agents', label: 'Agents' },
 		{ href: '/runs', label: 'Agent Runs' },
+		{ href: '/goals', label: 'Goals' },
 		{ href: '/skills', label: 'Skills' },
 		{ href: '/settings', label: 'Settings' }
 	];

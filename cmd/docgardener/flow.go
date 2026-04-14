@@ -493,11 +493,21 @@ flags=--port --config --socket --data-dir --log-format --log-level --otel-endpoi
 timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF`
 	case "cli-verifier":
-		return `cat <<EOF
+		// The cli-verifier participates in the resource-request
+		// protocol: it checks for a scoped secret (MCPPROXY_API_KEY)
+		// in its injected env. If the secret is missing the verifier
+		// still produces a finding but flags that it's running in
+		// "unauthenticated" mode; the agent itself DMs #requests from
+		// Go code (see agent.go::handleSpecialist).
+		return `
+KEY_STATE="missing"
+if [ -n "${MCPPROXY_API_KEY:-}" ]; then KEY_STATE="present"; fi
+cat <<EOF
 #verified task=` + fmt.Sprint(t.ID) + `
 source=mcpproxy --help
 matched=10
 missing=--otel-endpoint --retention
+mcpproxy_api_key=$KEY_STATE
 timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF`
 	case "drift-reporter":

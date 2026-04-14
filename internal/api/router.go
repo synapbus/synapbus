@@ -10,6 +10,8 @@ import (
 	"github.com/synapbus/synapbus/internal/apikeys"
 	"github.com/synapbus/synapbus/internal/attachments"
 	"github.com/synapbus/synapbus/internal/channels"
+	"github.com/synapbus/synapbus/internal/goals"
+	"github.com/synapbus/synapbus/internal/goaltasks"
 	"github.com/synapbus/synapbus/internal/harness/runs"
 	"github.com/synapbus/synapbus/internal/k8s"
 	"github.com/synapbus/synapbus/internal/messaging"
@@ -43,6 +45,8 @@ type RouterConfig struct {
 	ReactorStore      *reactor.Store
 	ReactorEngine     *reactor.Reactor
 	HarnessRunsStore  *runs.Store
+	GoalsService      *goals.Service
+	GoalTasksService  *goaltasks.Service
 	WikiService       *wiki.Service
 	SSEHub            *SSEHub
 	Broadcaster       *SSEBroadcaster
@@ -263,6 +267,17 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Get("/api/runs/{id}", runsHandler.GetRun)
 			r.Post("/api/runs/{id}/retry", runsHandler.RetryRun)
 			r.Get("/api/agents/reactive", runsHandler.ReactiveAgents)
+		})
+	}
+
+	// Goals
+	if cfg.GoalsService != nil && cfg.GoalTasksService != nil && cfg.DB != nil {
+		goalsHandler := NewGoalsHandler(cfg.GoalsService, cfg.GoalTasksService, cfg.DB)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+
+			r.Get("/api/goals", goalsHandler.ListGoals)
+			r.Get("/api/goals/{id}", goalsHandler.GetGoal)
 		})
 	}
 

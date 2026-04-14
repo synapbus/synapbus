@@ -45,6 +45,7 @@ __pycache__/
 benchmark/data/
 benchmark/results/
 .venv-bench/
+.venv-kimi/
 .venv/
 
 # Debug

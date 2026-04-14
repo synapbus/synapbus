@@ -393,6 +393,29 @@ func (a *agentRunner) handleSpecialist(ctx context.Context) (string, error) {
 	tokensOut := int64(400 + 100*(taskID%3))
 	costCents := int64(25 + 10*(taskID%3))
 	_ = a.tasks.AddSpend(ctx, taskID, tokensIn+tokensOut, costCents)
+
+	// 4a. Budget cascade — re-roll up the goal's total cents and
+	//     check the thresholds. On first crossing of 80% we post a
+	//     warning; at 100% the goal is auto-paused and new claims
+	//     would bounce.
+	if g.RootTaskID != nil {
+		_, rollupCents, _, _ := a.tasks.RollupCosts(ctx, *g.RootTaskID)
+		verdict, err := a.goals.EvaluateBudget(ctx, g.ID, rollupCents)
+		if err == nil && verdict != nil {
+			if verdict.TriggerSoftAlert {
+				a.postSystemMessage(ctx, g.ChannelID,
+					fmt.Sprintf("⚠️  Budget soft alert: goal has consumed %.0f%% of its dollar budget.",
+						verdict.PercentBudget))
+				_ = a.goals.MarkSoftAlertPosted(ctx, g.ID)
+			}
+			if verdict.TriggerHardPause {
+				a.postSystemMessage(ctx, g.ChannelID,
+					fmt.Sprintf("🛑 Budget hard cap: goal at %.0f%% → auto-paused.", verdict.PercentBudget))
+				_ = a.goals.TransitionStatus(ctx, g.ID, goals.StatusPaused)
+			}
+		}
+	}
+
 	_ = a.tasks.Transition(ctx, taskID, goaltasks.StatusAwaitingVerification, goaltasks.Extras{CompletionMessageID: &artifactMsgID})
 
 	extras := goaltasks.Extras{}
@@ -412,11 +435,31 @@ func (a *agentRunner) handleSpecialist(ctx context.Context) (string, error) {
 		a.logger.Warn("append evidence failed", "err", err)
 	}
 
+	// 5a. Quarantine check — if the rolling reputation dropped below
+	//     0.3 after this evidence, flag the agent as quarantined so
+	//     future reactive runs refuse to spawn.
+	if score, _, err := a.ledger.RollingScore(ctx, hash, "default", 30); err == nil && score < 0.3 {
+		_, _ = a.db.ExecContext(ctx,
+			`UPDATE agents SET quarantined_at = ?, quarantine_reason = ? WHERE id = ? AND quarantined_at IS NULL`,
+			time.Now().UTC(), fmt.Sprintf("reputation=%.2f", score), specialistID)
+		a.postSystemMessage(ctx, g.ChannelID,
+			fmt.Sprintf("⛔  Agent %s quarantined — reputation %.2f below 0.3.", a.agentName, score))
+	}
+
 	// 6. Post a system summary line with real telemetry.
 	a.postSystemMessage(ctx, g.ChannelID,
 		fmt.Sprintf("Task %d %q %s by %s — tokens_in=%d tokens_out=%d cost=$%.2f duration=%dms Δrep=%+.2f",
 			taskID, t.Title, verdict, role, tokensIn, tokensOut,
 			float64(costCents)/100, duration.Milliseconds(), scoreDelta))
+
+	// 6a. Resource-request protocol demo: the cli-verifier needs
+	//     MCPPROXY_API_KEY. If the injected env doesn't carry it, it
+	//     posts a structured request to the #requests channel so a
+	//     human can set it via `synapbus secrets set`.
+	if role == "cli-verifier" && os.Getenv("MCPPROXY_API_KEY") == "" {
+		a.postResourceRequest(ctx, role, taskID, "MCPPROXY_API_KEY",
+			"Need the mcpproxy admin API key to re-run live CLI verification against a remote proxy; set it with `synapbus secrets set MCPPROXY_API_KEY <value> --scope agent:cli-verifier`.")
+	}
 
 	// 7. DM coordinator with DONE or FAIL.
 	reply := fmt.Sprintf("%s task=%d role=%s tokens_in=%d tokens_out=%d cost_cents=%d duration_ms=%d",
@@ -560,6 +603,59 @@ func (a *agentRunner) spawnSpecialist(ctx context.Context, ownerID, parentID int
 	}
 	id, _ := res.LastInsertId()
 	return id, nil
+}
+
+// postResourceRequest writes a structured resource_requests row AND
+// posts a #requests channel message describing the missing secret.
+// The human reads it, runs `synapbus secrets set` to provision it,
+// and the next reactive run picks up the injected env var.
+func (a *agentRunner) postResourceRequest(ctx context.Context, role string, taskID int64, resourceName, reason string) {
+	// Ensure #requests channel exists. Admin CLI creates it in
+	// start.sh; we re-check defensively here and create if missing.
+	var reqChannelID int64
+	err := a.db.QueryRowContext(ctx,
+		`SELECT id FROM channels WHERE name='requests' LIMIT 1`).Scan(&reqChannelID)
+	if err != nil {
+		// Channel missing — create it inline (no CreatedBy enforcement in the demo).
+		res, cerr := a.db.ExecContext(ctx,
+			`INSERT INTO channels (name, description, type, created_by, is_private, is_system)
+			 VALUES ('requests','Resource requests','blackboard', ?, 0, 1)`,
+			a.agentName)
+		if cerr != nil {
+			a.logger.Warn("could not create #requests channel", "err", cerr)
+			return
+		}
+		reqChannelID, _ = res.LastInsertId()
+	}
+
+	body := fmt.Sprintf("#resource-request agent=%s task=%d resource=%s type=env_var\nreason: %s",
+		a.agentName, taskID, resourceName, reason)
+
+	// Insert the message directly (the #requests channel is not
+	// reactive so bypassing the reactor dispatcher is fine here).
+	convID, cerr := a.ensureConversation(ctx, reqChannelID)
+	if cerr != nil {
+		a.logger.Warn("could not ensure #requests conversation", "err", cerr)
+		return
+	}
+	now := time.Now().UTC()
+	_, err = a.db.ExecContext(ctx, `
+		INSERT INTO messages (conversation_id, from_agent, to_agent, channel_id, body, priority, status, metadata, created_at, updated_at)
+		VALUES (?, ?, NULL, ?, ?, 7, 'done', '{"kind":"resource-request"}', ?, ?)`,
+		convID, a.agentName, reqChannelID, body, now, now)
+	if err != nil {
+		a.logger.Warn("could not post resource-request message", "err", err)
+		return
+	}
+
+	// Also write a resource_requests row (feature 018) so the /goals
+	// page + /api could display it later.
+	_, _ = a.db.ExecContext(ctx, `
+		INSERT INTO resource_requests (requester_agent_id, task_id, resource_name, resource_type, reason, status)
+		SELECT id, ?, ?, 'env_var', ?, 'pending' FROM agents WHERE name=?`,
+		taskID, resourceName, reason, a.agentName)
+
+	a.logger.Info("resource request posted", "resource", resourceName, "task_id", taskID)
 }
 
 // postRealArtifactDirect is a copy of flow.go's postRealArtifact that

@@ -34,6 +34,9 @@ import (
 	"github.com/synapbus/synapbus/internal/auth/idp"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
+	"github.com/synapbus/synapbus/internal/goals"
+	"github.com/synapbus/synapbus/internal/goaltasks"
+	"github.com/synapbus/synapbus/internal/secrets"
 	"github.com/synapbus/synapbus/internal/dispatcher"
 	"github.com/synapbus/synapbus/internal/health"
 	"github.com/synapbus/synapbus/internal/jsruntime"
@@ -108,6 +111,9 @@ func main() {
 
 	// Add wiki export/import subcommands.
 	addWikiCommands(rootCmd)
+
+	// Add secrets CLI (resource-request protocol, feature 018).
+	rootCmd.AddCommand(registerSecretsCLI())
 
 	if err := rootCmd.Execute(); err != nil {
 		slog.Error("command failed", "error", err)
@@ -514,6 +520,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	harnessRegistry.Observer = harnessRunsStore
 	reactorEngine.SetHarnessRegistry(harnessRegistry)
 	reactorEngine.SetReactionNotifier(&reactorReactionAdapter{svc: reactionService})
+
+	// Secrets store — feature 018. Encrypted secrets scoped to
+	// user/agent/task, injected by the reactor as env vars on each
+	// reactive subprocess run.
+	secretsStore, err := secrets.NewStore(db.DB, dataDir, slog.Default())
+	if err != nil {
+		slog.Warn("secrets store unavailable — reactive runs will not receive injected secrets", "error", err)
+	} else {
+		reactorEngine.SetSecretProvider(secretsStore)
+		slog.Info("secrets store bootstrapped and wired to reactor")
+	}
 	slog.Info("harness registry configured",
 		"backends", harnessRegistry.Names(),
 	)
@@ -536,6 +553,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create MCP server (4 hybrid tools: my_status, send_message, search, execute)
 	wikiService := wiki.NewService(db.DB)
+
+	// Goals + goal_tasks (feature 018 — dynamic agent spawning).
+	goalsStore := goals.NewStore(db.DB)
+	goalTasksStore := goaltasks.NewStore(db.DB)
+	goalChannelCreator := &svcGoalChannelCreator{channels: channelService}
+	goalsService := goals.NewService(goalsStore, goalChannelCreator, slog.Default())
+	goalTasksService := goaltasks.NewService(goalTasksStore, slog.Default())
 
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, wikiService, con, jsPool, actionRegistry, actionIndex, db.DB)
 
@@ -731,6 +755,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ReactorStore:      reactorStore,
 		ReactorEngine:     reactorEngine,
 		HarnessRunsStore:  harnessRunsStore,
+		GoalsService:      goalsService,
+		GoalTasksService:  goalTasksService,
 		BaseURL:           baseURL,
 		WikiService:       wikiService,
 	})

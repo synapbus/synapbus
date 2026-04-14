@@ -104,6 +104,44 @@ func (s *Service) TransitionStatus(ctx context.Context, goalID int64, newStatus 
 	return s.store.SetStatus(ctx, goalID, newStatus)
 }
 
+// BudgetVerdict describes what the budget enforcer wants the caller to do.
+type BudgetVerdict struct {
+	PercentBudget float64 // 0..100+
+	TriggerSoftAlert bool  // first time we cross 80%
+	TriggerHardPause bool  // crossed 100% and goal is still active
+}
+
+// EvaluateBudget computes current spend-vs-budget for a goal and returns
+// the enforcement verdict. It does NOT mutate state on its own — the
+// caller uses MarkSoftAlertPosted / TransitionStatus to apply the
+// verdict once it has posted the corresponding system messages.
+//
+// Only dollar-cents budget is enforced in MVP (tokens are tracked but
+// don't trip the cascade).
+func (s *Service) EvaluateBudget(ctx context.Context, goalID int64, spentCents int64) (*BudgetVerdict, error) {
+	g, err := s.store.Get(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	v := &BudgetVerdict{}
+	if g.BudgetDollarsCents == nil || *g.BudgetDollarsCents <= 0 {
+		return v, nil
+	}
+	v.PercentBudget = float64(spentCents) / float64(*g.BudgetDollarsCents) * 100.0
+	if v.PercentBudget >= 80 && !g.Alert80PctPosted {
+		v.TriggerSoftAlert = true
+	}
+	if v.PercentBudget >= 100 && g.Status == StatusActive {
+		v.TriggerHardPause = true
+	}
+	return v, nil
+}
+
+// MarkSoftAlertPosted records that the 80% soft-alert was emitted.
+func (s *Service) MarkSoftAlertPosted(ctx context.Context, goalID int64) error {
+	return s.store.MarkSoftAlertPosted(ctx, goalID)
+}
+
 func legalTransition(from, to string) bool {
 	switch from {
 	case StatusDraft:

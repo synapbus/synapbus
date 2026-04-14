@@ -32,6 +32,13 @@ const (
 )
 
 // Reactor is the reactive agent triggering engine.
+// SecretProvider builds the env map of scoped secrets to inject into a
+// reactive subprocess run. Returning an error is non-fatal — the run
+// proceeds without any injected secrets and the error is logged.
+type SecretProvider interface {
+	BuildEnvMap(ctx context.Context, userID, agentID, taskID int64) (map[string]string, error)
+}
+
 type Reactor struct {
 	store          *Store
 	agentStore     agents.AgentStore
@@ -39,6 +46,7 @@ type Reactor struct {
 	registry       *harness.Registry
 	notifier       FailureNotifier
 	reactions      ReactionNotifier
+	secrets        SecretProvider
 	logger         *slog.Logger
 }
 
@@ -76,6 +84,12 @@ func (r *Reactor) SetFailureNotifier(n FailureNotifier) {
 // the existing JobRunner + poller path for restart-safety.
 func (r *Reactor) SetHarnessRegistry(reg *harness.Registry) {
 	r.registry = reg
+}
+
+// SetSecretProvider wires the component that reads scoped secrets for
+// the reactor to inject into subprocess runs as env vars.
+func (r *Reactor) SetSecretProvider(p SecretProvider) {
+	r.secrets = p
 }
 
 // SetReactionNotifier wires the component that marks triggering DMs
@@ -146,6 +160,20 @@ func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event d
 	// 2. Check trigger mode
 	if agent.TriggerMode != agents.TriggerModeReactive {
 		return nil // Not reactive, skip
+	}
+
+	// 2a. Refuse to dispatch to a quarantined agent. Quarantine is set
+	// when the agent's rolling reputation drops below the threshold
+	// (0.3 by default). Existing in-flight runs are allowed to finish
+	// but no new reactive runs will spawn.
+	if agent.QuarantinedAt != nil {
+		r.logger.Info("reactive dispatch to quarantined agent refused",
+			"agent", agentName,
+			"quarantined_at", agent.QuarantinedAt,
+			"reason", agent.QuarantineReason,
+		)
+		r.recordSkippedRun(ctx, agentName, event, StatusFailed, "agent quarantined: "+agent.QuarantineReason)
+		return nil
 	}
 
 	// 3. Pick a backend. K8s agents (k8s_image set) keep the existing
@@ -335,6 +363,19 @@ func (r *Reactor) dispatchHarness(ctx context.Context, agent *agents.Agent, even
 			"SYNAPBUS_EVENT":         event.EventType,
 			"SYNAPBUS_FROM_AGENT":    event.FromAgent,
 		},
+	}
+
+	// Inject scoped secrets as env vars (user + agent scope; task scope
+	// is added when a task ID becomes available in the trigger path).
+	if r.secrets != nil {
+		if secretEnv, serr := r.secrets.BuildEnvMap(ctx, agent.OwnerID, agent.ID, 0); serr == nil {
+			for k, v := range secretEnv {
+				req.Env[k] = v
+			}
+		} else {
+			r.logger.Warn("secret provider failed — continuing without injection",
+				"agent", agent.Name, "error", serr)
+		}
 	}
 
 	// Block on a detached context so a cancelled incoming request

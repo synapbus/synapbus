@@ -347,4 +347,14 @@ export const runs = {
 	reactiveAgents: () => request<{ agents: any[] }>('GET', '/api/agents/reactive')
 };
 
+export const goals = {
+	list: (params?: { limit?: number }) => {
+		const qs = new URLSearchParams();
+		if (params?.limit) qs.set('limit', String(params.limit));
+		const q = qs.toString();
+		return request<{ goals: any[] }>('GET', `/api/goals${q ? '?' + q : ''}`);
+	},
+	get: (id: number) => request<any>('GET', `/api/goals/${id}`)
+};
+
 export { ApiError };
