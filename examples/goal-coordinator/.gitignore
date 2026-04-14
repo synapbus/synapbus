@@ -1,0 +1,4 @@
+synapbus.log
+data/
+bin/
+.synapbus.pid
