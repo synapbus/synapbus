@@ -441,6 +441,32 @@ func (r *Reactor) runHarness(runID int64, agent *agents.Agent, event dispatcher.
 			"duration_ms", durationMs,
 		)
 	}
+
+	// If pending_work was set while this run was in progress, kick off
+	// a coalesced follow-up run. Matches the K8s poller path in
+	// poller.checkPendingWork — subprocess completions don't go
+	// through the poller, so we do it inline here.
+	r.checkPendingWork(context.Background(), agent.Name)
+}
+
+// checkPendingWork launches a coalesced run if pending_work is set on
+// the agent. Mirrors the K8s poller's logic so subprocess-backed
+// agents don't drop messages that arrive while they're busy.
+func (r *Reactor) checkPendingWork(ctx context.Context, agentName string) {
+	agent, err := r.agentStore.GetAgentByName(ctx, agentName)
+	if err != nil || agent == nil || !agent.PendingWork {
+		return
+	}
+	_ = r.agentStore.SetPendingWork(ctx, agentName, false)
+	r.logger.Info("pending_work found, launching coalesced run", "agent", agentName)
+	event := dispatcher.MessageEvent{
+		EventType: "message.received",
+		FromAgent: "__coalesced__",
+		ToAgent:   agentName,
+		Body:      "Coalesced trigger: process all pending messages.",
+		Depth:     0,
+	}
+	_ = r.evaluateTrigger(ctx, agentName, event)
 }
 
 // createJob creates a K8s Job for the reactive trigger.

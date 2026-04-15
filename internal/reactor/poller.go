@@ -212,7 +212,7 @@ func (p *Poller) checkPendingWork(ctx context.Context, agentName string) {
 	// Create a synthetic event (coalesced — agent will pick up all pending messages via claim_messages)
 	event := dispatcher.MessageEvent{
 		EventType:       "message.received",
-		FromAgent:       "system",
+		FromAgent:       "__coalesced__",
 		ToAgent:         agentName,
 		Body:            "Coalesced trigger: process all pending messages.",
 		MentionedAgents: nil,

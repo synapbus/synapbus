@@ -512,8 +512,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// and webhook agents go through Registry.Execute.
 	harnessRegistry := harness.NewRegistry()
 	harnessRegistry.Register(k8sjob.New(k8sRunner, nil, slog.Default()))
+	// SYNAPBUS_KEEP_WORKDIR=1 preserves per-run workdirs after successful
+	// runs. Useful when debugging MCP tool traces, gemini stdout, or
+	// materialized config files. Default off to avoid disk growth.
+	keepWorkdir := os.Getenv("SYNAPBUS_KEEP_WORKDIR") == "1"
 	harnessRegistry.Register(subprocess.New(subprocess.Config{
-		BaseDir: filepath.Join(dataDir, "harness", "subprocess"),
+		BaseDir:              filepath.Join(dataDir, "harness", "subprocess"),
+		KeepWorkdirOnSuccess: keepWorkdir,
 	}, slog.Default()))
 	harnessRegistry.Register(webhook.New(webhook.Config{}, slog.Default()))
 	harnessRunsStore := runs.New(db.DB, slog.Default())

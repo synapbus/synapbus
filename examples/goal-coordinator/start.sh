@@ -72,6 +72,9 @@ say "starting synapbus on port $PORT"
 export SYNAPBUS_DISABLE_EXPIRY_WORKER=1
 export SYNAPBUS_DISABLE_RETENTION_WORKER=1
 export SYNAPBUS_DISABLE_STALEMATE_WORKER=1
+# Keep per-run workdirs so you can inspect GEMINI.md, .gemini/settings.json,
+# MCP traces, and gemini stdout/stderr under data/harness/subprocess/.
+export SYNAPBUS_KEEP_WORKDIR=1
 nohup "$BIN" serve --port "$PORT" --data "$DATA_DIR" \
     > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
@@ -119,6 +122,17 @@ UPDATE agents SET
 WHERE name IN ('goal-coordinator','generic-inspector','critic-auditor');
 SQL
 
+# --- mint fresh API key for coordinator so Gemini can call MCP -------
+# The coordinator reaches SynapBus's MCP endpoint via the agent's own
+# API key (Bearer auth). revoke-key always returns a fresh token; we
+# parse the JSON and substitute it into configs/coordinator.json at
+# apply_config time.
+say "minting API key for goal-coordinator (MCP auth)"
+COORDINATOR_APIKEY=$(admin agent revoke-key --name goal-coordinator | jq -r '.new_api_key')
+if [ -z "$COORDINATOR_APIKEY" ] || [ "$COORDINATOR_APIKEY" = "null" ]; then
+    die "failed to mint API key for goal-coordinator" 4
+fi
+
 # --- apply per-agent harness config -----------------------------------
 apply_config() {
     local agent="$1"
@@ -128,6 +142,8 @@ apply_config() {
     sed \
         -e "s|__SOCKET__|${SOCKET//|/\\|}|g" \
         -e "s|__BIN__|${BIN//|/\\|}|g" \
+        -e "s|__PORT__|${PORT}|g" \
+        -e "s|__COORDINATOR_APIKEY__|${COORDINATOR_APIKEY}|g" \
         -e "s|__COORDINATOR_MODEL__|${COORDINATOR_MODEL}|g" \
         -e "s|__WORKER_MODEL__|${WORKER_MODEL}|g" \
         "$config_path" > "$tmp"
