@@ -33,6 +33,16 @@ FROM=$(jq -r '.from_agent' < /workspace/message.json)
 
 log "cli=$CLI from=$FROM body_bytes=$(printf '%s' "$BODY" | wc -c)"
 
+# Synthetic coalesced trigger — fired by the reactor when pending_work
+# was set during another run. There's no real user message to respond
+# to; invoking the CLI here would just produce a spurious reply based
+# on the placeholder body. Exit 0 so the reactor marks the run as
+# succeeded without burning LLM tokens.
+if [ "$FROM" = "__coalesced__" ]; then
+    log "synthetic coalesced trigger — skipping CLI invocation"
+    exit 0
+fi
+
 case "$CLI" in
 gemini)
     PROMPT_FILE=/workspace/GEMINI.md
