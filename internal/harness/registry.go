@@ -106,6 +106,15 @@ func (r *Registry) Resolve(agent *agents.Agent) (Harness, error) {
 			return h, nil
 		}
 	}
+	// Docker block in harness_config_json takes precedence over a plain
+	// local_command — same precedence the reactor uses, so explicit
+	// isolation never silently downgrades to subprocess.
+	if agent != nil && agent.HarnessConfigJSON != "" &&
+		strings.Contains(agent.HarnessConfigJSON, "\"docker\"") {
+		if h, ok := r.byName["docker"]; ok {
+			return h, nil
+		}
+	}
 	if agent != nil && agent.LocalCommand != "" {
 		if h, ok := r.byName["subprocess"]; ok {
 			return h, nil

@@ -48,6 +48,7 @@ import (
 	"github.com/synapbus/synapbus/internal/messaging"
 	prommetrics "github.com/synapbus/synapbus/internal/metrics"
 	"github.com/synapbus/synapbus/internal/harness"
+	"github.com/synapbus/synapbus/internal/harness/docker"
 	"github.com/synapbus/synapbus/internal/harness/k8sjob"
 	"github.com/synapbus/synapbus/internal/harness/runs"
 	"github.com/synapbus/synapbus/internal/harness/subprocess"
@@ -521,6 +522,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		KeepWorkdirOnSuccess: keepWorkdir,
 	}, slog.Default()))
 	harnessRegistry.Register(webhook.New(webhook.Config{}, slog.Default()))
+	// Docker isolation backend — agents whose harness_config_json has a
+	// `docker.image` block run inside ephemeral containers. Same per-run
+	// workdir convention as subprocess; the workdir is bind-mounted at
+	// /workspace so wrappers and config files (.gemini/settings.json,
+	// CLAUDE.md, message.json) reach the container unchanged. The MCP
+	// host gets rewritten from 127.0.0.1 to host.docker.internal so the
+	// in-container Gemini/Claude CLI can reach the SynapBus MCP server.
+	harnessRegistry.Register(docker.New(docker.Config{
+		BaseDir:              filepath.Join(dataDir, "harness", "docker"),
+		KeepWorkdirOnSuccess: keepWorkdir,
+		HostMCPPort:          port,
+	}, slog.Default()))
 	harnessRunsStore := runs.New(db.DB, slog.Default())
 	harnessRegistry.Observer = harnessRunsStore
 	reactorEngine.SetHarnessRegistry(harnessRegistry)

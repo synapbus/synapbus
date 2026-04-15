@@ -27,6 +27,7 @@ import (
 const (
 	backendK8s        = "k8s"
 	backendSubprocess = "subprocess"
+	backendDocker     = "docker"
 	backendWebhook    = "webhook"
 	backendNone       = ""
 )
@@ -197,7 +198,7 @@ func (r *Reactor) evaluateTrigger(ctx context.Context, agentName string, event d
 			r.recordSkippedRun(ctx, agentName, event, StatusFailed, "K8s runner not available")
 			return nil
 		}
-	case backendSubprocess, backendWebhook:
+	case backendSubprocess, backendDocker, backendWebhook:
 		// 4. Harness-specific precondition: registry must be wired and
 		// the resolver must pick the backend we think we should get.
 		if r.registry == nil {
@@ -286,12 +287,19 @@ func (r *Reactor) agentBackendKind(agent *agents.Agent) string {
 			return backendK8s
 		case "subprocess":
 			return backendSubprocess
+		case "docker":
+			return backendDocker
 		case "webhook":
 			return backendWebhook
 		}
 	}
 	if agent.K8sImage != "" {
 		return backendK8s
+	}
+	// Docker block in harness_config_json wins over local_command — an
+	// agent that defines both is asking to run isolated.
+	if agent.HarnessConfigJSON != "" && strings.Contains(agent.HarnessConfigJSON, "\"docker\"") {
+		return backendDocker
 	}
 	if agent.LocalCommand != "" {
 		return backendSubprocess
