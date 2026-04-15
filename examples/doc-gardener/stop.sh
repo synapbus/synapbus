@@ -30,4 +30,18 @@ if kill -0 "$PID" 2>/dev/null; then
     kill -9 "$PID" 2>/dev/null || true
 fi
 rm -f "$PID_FILE"
+
+# Best-effort cleanup of any lingering agent containers. `--rm` should
+# have removed them when the wrapper exited, but if SynapBus was killed
+# mid-run those containers can outlive the parent and hold bind-mount
+# references that prevent the next start.sh from re-mounting the same
+# workdir paths.
+if command -v docker >/dev/null 2>&1; then
+    STALE=$(docker ps -aq --filter "name=synapbus-" 2>/dev/null || true)
+    if [ -n "$STALE" ]; then
+        say "removing stale agent containers"
+        docker rm -f $STALE >/dev/null 2>&1 || true
+    fi
+fi
+
 say "stopped"

@@ -1,166 +1,149 @@
-# doc-gardener
+# doc-gardener — docker-isolated doc verification demo
 
-End-to-end demo of the **dynamic agent spawning** feature (spec `018-dynamic-agent-spawning`).
+A real, working multi-agent example that:
 
-A human owner defines a high-level goal ("verify docs.mcpproxy.app against the mcpproxy source code"). A pre-built **coordinator** meta-agent decomposes the goal into a task tree, proposes spawning **specialist sub-agents** with capped autonomy, the specialists claim tasks and produce artifacts, and a rich HTML report is generated from the run.
+1. Takes a goal like *"Verify the CLI commands on docs.mcpproxy.app/cli/command-reference still exist in the current mcpproxy binary"*.
+2. Routes it through `doc-coordinator`, which calls SynapBus MCP tools (`create_goal`, `propose_task_tree`, `send_message`) to record the goal and dispatch work.
+3. Spawns `docs-inspector` inside an **isolated Docker container** to actually `curl` the docs, install/run `mcpproxy`, parse output, and tabulate drift.
+4. Forwards the findings to `docs-critic` — a separate container with its own MCP key — for an independent audit.
+5. Returns a `FINAL:` summary back to the human.
 
-This example exercises the feature's **data primitives** end-to-end: goal creation with a backing channel, task-tree materialization with denormalized ancestry, `config_hash`-rooted trust, delegation-cap enforcement, atomic task claim, append-only reputation ledger, cost rollup, HTML rendering from DB state.
+Every agent runs in its own ephemeral container with `--cap-drop=ALL`, `--security-opt=no-new-privileges`, `--read-only` root + tmpfs `/tmp`, `--pids-limit`, memory + CPU quotas, and `--user` set to your host UID. The container can reach the SynapBus MCP server on the host at `host.docker.internal:18089` but nothing else of yours unless you mount it in.
 
-## Status of the MVP demo
+## Architecture
+
+```
+algis ──DM──▶ doc-coordinator      (Gemini Pro, container)
+                  │
+                  │  MCP tools: create_goal, propose_task_tree, send_message
+                  ▼
+              ┌── reply ──▶ algis                                (TRIVIAL)
+              ├── refuse ─▶ algis  (CANNOT: …)                   (INFEASIBLE)
+              └── delegate ──▶ docs-inspector  (Gemini Flash, container)
+                                   │
+                                   │  shell tools: curl, jq, mcpproxy …
+                                   │  MCP: send_message
+                                   ▼
+                               docs-critic    (Gemini Flash, container)
+                                   │
+                                   │  spot-checks evidence; MCP: send_message
+                                   ▼
+                               algis (FINAL: … or REVISING: …)
+```
+
+Three independent agents, three MCP API keys, three containers. The critic is structurally separate from the inspector — it has its own `config_hash` and reputation, and reads only the inspector's findings JSON, not its reasoning trace.
+
+## What's actually real (not synthetic)
 
 | Piece | Status |
 |---|---|
-| Goal creation + backing channel | ✅ real |
-| Task tree materialization (ancestry snapshots) | ✅ real |
-| Atomic optimistic-lock task claim | ✅ real (covered by 50-goroutine race test in `internal/goaltasks/`) |
-| Config-hash computation (deterministic, sensitive to capability changes) | ✅ real (tested in `internal/trust/`) |
-| Delegation cap enforcement (child ≤ parent) | ✅ real (tested in `internal/trust/`) |
-| Append-only reputation ledger with 70 %-of-parent seed and exponential decay | ✅ real (tested in `internal/trust/`) |
-| Cost rollup via recursive CTE | ✅ real (tested in `internal/goaltasks/`) |
-| Rich HTML report (goal / tree / agents / costs / timeline) | ✅ real |
-| Secret encryption + scoped env injection | ✅ real (`internal/secrets/`, tested) |
-| Coordinator driven by a real LLM | ❌ deferred — the demo's coordinator logic lives in Go (`cmd/docgardener/flow.go`); the LLM-in-the-loop path needs MCP tool wiring + reactor integration |
-| Specialist subprocess runs via the harness | ❌ deferred — the demo produces synthetic artifacts |
-| Full MCP tool surface (`create_goal`, `propose_task_tree`, `propose_agent`, `claim_task`, `verify_task`, `request_resource`, `list_resources`) | ❌ contracts live in `specs/018-dynamic-agent-spawning/contracts/mcp-tools.md`; wiring is deferred |
-| Svelte `/goals` UI | ❌ deferred |
+| Three Docker-isolated agent containers (`--cap-drop=ALL`, read-only root, pids/mem/cpu limits) | ✅ |
+| MCP-native dispatch — every agent calls `send_message` directly via Gemini's MCP client | ✅ |
+| `create_goal` + `propose_task_tree` materialize real rows in `goals` / `goal_tasks` | ✅ |
+| Inspector has shell access inside the sandbox to fetch docs and run CLIs | ✅ |
+| Coordinator/inspector/critic each get their own SynapBus API key | ✅ |
+| Trust model (`config_hash`, delegation cap, reputation ledger) | ✅ (covered by `internal/trust/` tests) |
+| Atomic task claim, cost rollup via recursive CTE | ✅ (covered by `internal/goaltasks/` tests) |
+| Rich HTML report (goal tree / agents / spend / timeline) | ✅ via `./report.sh` |
+| Secret encryption + scoped env injection | ✅ via `internal/secrets/` |
+| Svelte `/goals` UI | ✅ at `http://localhost:18089/goals` |
 
-See `specs/018-dynamic-agent-spawning/tasks.md` for the full phase breakdown and what remains.
+## Prerequisites
 
-## Prereqs
+- Docker daemon running (`docker version` works)
+- `go`, `jq`, `sqlite3`, `curl` on PATH
+- A Gemini API key from <https://aistudio.google.com/apikey>:
+  ```bash
+  export GEMINI_API_KEY=...
+  ```
 
-- Go 1.25+
-- `sqlite3`, `curl` on `$PATH`
-- A free TCP port (default `18089`)
+The first `./start.sh` builds the canonical `synapbus-agent` image (`image-build/synapbus-agent/Dockerfile`) — Debian slim + Node 22 + `gemini`, `claude`, `jq`, `sqlite3`, `curl`, `git`, `python3`, `tini`. ~2-5 minutes the first time, cached afterwards.
 
-## Run it
+## Run
 
 ```bash
-./start.sh            # build + launch synapbus on port 18089
-./run_task.sh         # execute the demo flow
-./report.sh           # render report.html
-./stop.sh             # shut down synapbus
+export GEMINI_API_KEY=...
+
+./start.sh                                  # builds binary + image, provisions agents
+./run_task.sh                               # default brief: verify mcpproxy CLI flags
+./run_task.sh "what does this demo do?"     # TRIVIAL path — coordinator answers directly
+./run_task.sh "Transfer money from my bank" # INFEASIBLE — coordinator refuses
+./report.sh                                 # render rich HTML report
+./stop.sh
 ```
 
-`run_task.sh` can be re-run any number of times against a running instance — each invocation creates a new goal + task tree + reputation evidence, all appended to the ledger.
+Web UI at `http://localhost:18089` (login `algis` / `algis-demo-pw`):
 
-## What happens under the hood
+- `/runs` — every reactive harness run, captured prompts + responses, exit codes, durations
+- `/goals` — goal tree + task state + spend per billing code
+- `/agents` — three agents, each with its own `config_hash` and reputation
+- `/dm/algis` — DM thread with `doc-coordinator`
 
-`./run_task.sh` invokes `./bin/docgardener run` which:
+## How it isolates
 
-1. **Bootstraps**: creates user `algis` (password `algis-demo-pw`), creates the `approvals` and `requests` channels, and materializes the pre-built coordinator agent (`doc-gardener-coordinator`) with its `config_hash` computed from its system prompt and tool scope.
-2. **Creates a goal** via `goals.Service.CreateGoal` — slug `keep-docs-mcpproxy-app-accurate-against-source`, budget `$50.00`, `max_spawn_depth=3`. Auto-creates the `#goal-...` backing channel.
-3. **Decomposes** the goal into a 4-node task tree (root + `scan-docs` + `verify-cli` + `drift-report` leaves) via `goaltasks.Service.CreateTree`, which denormalizes the full ancestry onto each child task in a single transaction.
-4. **Spawns specialists** — three agents (`docs-scanner`, `cli-verifier`, `drift-reporter`), each one running through `trust.DelegationCap()` to verify its proposed grant does not exceed the coordinator's, then computing a deterministic `trust.ConfigHash(...)` and seeding its reputation ledger at **70 % of the parent's rolling score** via `trust.Ledger.SeedFromParent()`.
-5. **Atomically claims tasks** — each specialist invokes `goaltasks.Service.Claim()` which runs the optimistic-lock `UPDATE ... WHERE assignee_agent_id IS NULL AND status='approved'` pattern. A concurrent-claim race test in `internal/goaltasks/service_test.go` verifies exactly-one-winner over 50 goroutine rounds.
-6. **Runs specialists** — simulated for the v1 demo. Each task:
-   - transitions `claimed → in_progress → awaiting_verification → done`
-   - increments leaf spend (`tokens`, `dollars_cents`)
-   - posts an artifact message (`#finding`, `#verified`, `#summary`) to the goal channel with `metadata.kind="artifact"`
-   - appends a **positive evidence row** to the reputation ledger with `score_delta=+0.15` (auto verifier) or `+0.2` (command verifier)
-7. **Marks the goal completed**.
+The `docker` block in each `configs/*.json` is what makes this happen:
 
-`./report.sh` then invokes `./bin/docgardener report`, which:
-
-1. reads the goal id from `.last_goal_id`
-2. queries all tasks, agents, reputation, messages, billing codes for that goal
-3. computes rolling reputation via `trust.Ledger.RollingScore()` (exponential decay, `half_life_days=30`)
-4. builds a recursive task tree + a chronological timeline
-5. renders `report.html.tmpl` into `report.html`
-6. opens it in the default browser
-
-## Inspect during / after the run
-
-- **Web UI**: http://localhost:18089 — log in as `algis` / `algis-demo-pw`. The existing channels, messages, and agents views all work on the new data.
-- **DB shell**:
-  ```bash
-  sqlite3 ./data/synapbus.db -header -column "
-    SELECT id, title, status, spent_dollars_cents, assignee_agent_id FROM goal_tasks;
-  "
-  ```
-- **Trust ledger**:
-  ```bash
-  sqlite3 ./data/synapbus.db -header -column "
-    SELECT substr(config_hash,1,12) AS hash, score_delta, evidence_ref, created_at
-      FROM reputation_evidence ORDER BY created_at;
-  "
-  ```
-- **Cost rollup**:
-  ```bash
-  sqlite3 ./data/synapbus.db -header -column "
-    SELECT COALESCE(billing_code,''), SUM(spent_tokens), SUM(spent_dollars_cents)
-      FROM goal_tasks GROUP BY billing_code;
-  "
-  ```
-
-## Expected HTML report
-
-`report.html` contains six sections:
-
-1. **Header** — goal title, status, budget, owner, backing channel
-2. **Spend metrics** — total dollars / tokens / agents spawned
-3. **Goal description**
-4. **Task tree** — recursive, collapsible, status badges, per-task spend, verifier kind
-5. **Spawned agents** — each with name, `config_hash` (first 12 chars), parent agent, spawn depth, autonomy tier, rolling reputation bar, tool-scope chips, truncated system prompt
-6. **Cost breakdown by billing code** — per-code task count, tokens, dollars
-7. **Artifacts posted by specialists** — the raw `#finding`, `#verified`, `#summary` messages
-8. **Timeline** — every message in the goal channel, chronologically, annotated with actor and kind
-
-Screenshot-equivalent output (minus images):
-
-```
-Doc-gardener run — Keep docs.mcpproxy.app accurate against source
-Goal #4 · slug keep-docs-... · owner algis · backing channel #goal-... · [completed]
-
-Spend         Tokens        Agents spawned
-$1.05         6000          4
-
-Task tree
-├─ Verify docs.mcpproxy.app against source         [approved]
-│  ├─ Scan docs for CLI flags                      [done] $0.45 · 1500 tok · auto
-│  ├─ Verify flags exist in mcpproxy binary        [done] $0.25 · 2000 tok · auto
-│  └─ Produce drift report                         [done] $0.35 · 2500 tok · command
-
-Spawned agents
-  • Doc-gardener Coordinator   config_hash 70a9a06e9595…  root · assisted · rep 80%
-  • Docs Scanner               config_hash a0b5c6538b2d…  parent=coordinator · depth 1 · assisted · rep 58%
-  • CLI Verifier               config_hash 47c6839eed73…  parent=coordinator · depth 1 · assisted · rep 58%
-  • Drift Reporter             config_hash ceaa7816aa42…  parent=coordinator · depth 1 · assisted · rep 59%
-
-Cost breakdown
-  doc-gardener            1 task    0 tok  $0.00
-  doc-gardener/report     1 task 2500 tok  $0.35
-  doc-gardener/scan       1 task 1500 tok  $0.45
-  doc-gardener/verify     1 task 2000 tok  $0.25
+```json
+{
+  "docker": {
+    "image": "synapbus-agent:latest",
+    "memory": "1g",
+    "cpus": "1.0",
+    "network": "bridge"
+  }
+}
 ```
 
-## Tests for the primitives
+The SynapBus reactor sees the `docker.image` field, picks the `docker` harness backend (via `internal/harness/docker/`), and runs:
 
-The feature ships with passing test suites for every critical invariant:
-
-```bash
-go test ./internal/goals/... ./internal/goaltasks/... ./internal/trust/... ./internal/secrets/...
+```
+docker run --rm \
+    --workdir /workspace \
+    --mount type=bind,source=<run-workdir>,target=/workspace \
+    --security-opt no-new-privileges \
+    --cap-drop ALL \
+    --pids-limit 512 \
+    --read-only --tmpfs /tmp:rw,size=64m \
+    --memory 1g --memory-swap 1g \
+    --cpus 1.0 \
+    --network bridge \
+    --add-host host.docker.internal:host-gateway \
+    --user <host-uid>:<host-gid> \
+    --env GEMINI_API_KEY=... \
+    --env GEMINI_MODEL=... \
+    [other -e flags] \
+    synapbus-agent:latest
 ```
 
-- `internal/goaltasks/service_test.go`
-  - `TestCreateTree_AncestryAndDepth` — recursive tree build with correct depth + ancestry
-  - `TestCreateTree_AncestryOverflow` — 16 KB cap enforcement
-  - `TestClaimAtomic_Race` — 50 rounds × 2 racing goroutines, exactly one winner per round
-  - `TestRollupCosts` — recursive CTE over 4-level tree
-  - `TestTransition_StateMachine` — legal and illegal transitions
-- `internal/trust/config_hash_test.go` — determinism under shuffled inputs, sensitivity to capability changes
-- `internal/trust/delegation_test.go` — full tier-matrix + tool-scope subset enforcement
-- `internal/trust/ledger_test.go` — exponential decay, 70%-of-parent seed, clamping
-- `internal/secrets/store_test.go` — NaCl roundtrip, scope precedence, name sanitization
+The container's CMD is the standard `/usr/local/bin/synapbus-agent-wrapper.sh` baked into the image — it reads the bind-mounted `message.json`, loads `GEMINI.md`, and invokes `gemini -p` once. Every side effect happens through MCP tool calls inside the Gemini session; the container never reaches the SynapBus admin Unix socket because it doesn't have access to it.
 
-## Troubleshooting
+The `.gemini/settings.json` materialized by the harness already points at the host MCP server with the correct API key — the harness rewrites `127.0.0.1` to `host.docker.internal` for docker-backed agents automatically.
 
-| Symptom | Fix |
-|---|---|
-| `./start.sh` fails at "admin socket never appeared" | Another instance on port 18089 — set `SYNAPBUS_PORT=18090 ./start.sh` |
-| `./run_task.sh` fails with "DB not found" | `./start.sh` hasn't run — run it first |
-| Report page is empty or missing sections | `.last_goal_id` is stale — rerun `./run_task.sh` then `./report.sh` |
-| Stale binary | `rm -rf bin && ./start.sh` — forces rebuild |
+## Customize
 
-## Next steps (out of scope for this MVP)
+| Variable | Default | What it does |
+|---|---|---|
+| `SYNAPBUS_PORT` | `18089` | Host HTTP port |
+| `SYNAPBUS_COORDINATOR_MODEL` | `gemini-2.5-pro` | Smart triage model |
+| `SYNAPBUS_WORKER_MODEL` | `gemini-2.5-flash` | Fast inspector + critic model |
+| `SYNAPBUS_AGENT_IMAGE` | `synapbus-agent:latest` | Container image to run agents in |
+| `GEMINI_API_KEY` | (required) | Forwarded to every container as `-e` |
 
-The spec at `specs/018-dynamic-agent-spawning/` lays out what comes after this demo, including the full MCP tool surface, reactor integration for real subprocess runs, the Svelte `/goals` page, the resource-request protocol, quarantine on low reputation, and the LLM-driven coordinator. This example establishes that the foundational primitives work; the follow-up work layers on top.
+Override per-agent docker resources by editing `configs/*.json`:
+
+- `docker.memory` — `512m`, `1g`, `2g`
+- `docker.cpus` — `0.5`, `1.0`, `2.0`
+- `docker.network` — `bridge` (default, internet OK), `none` (air-gapped)
+- `docker.cap_add` — array of capabilities to grant on top of `--cap-drop=ALL`
+- `docker.extra_mounts` — additional read-only host bind mounts
+- `docker.read_only_root` — set to `false` if the agent CLI insists on writing outside `/tmp` and `/workspace`
+
+## What got removed
+
+The legacy `cmd/docgardener` Go binary used to contain ~2400 LOC of agent orchestration: a hardcoded 3-task tree, a `runDemo` flow that wrote directly to the DB, per-role subprocess entry points, a Gemini fallback for tree generation, channel bootstrap, etc. All of that is gone — replaced by:
+
+- `configs/coordinator.json` + `configs/inspector.json` + `configs/critic.json` (declarative GEMINI.md + docker block)
+- The standard `synapbus-agent-wrapper.sh` baked into the canonical image
+- The 6 spec-018 MCP tools that ship with `synapbus serve`
+
+`cmd/docgardener/` now contains only `report.go` + `template.go` + a tiny `main.go` cobra wrapper. The binary's only job is rendering the HTML snapshot you get from `./report.sh`.

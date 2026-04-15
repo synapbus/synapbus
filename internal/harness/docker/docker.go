@@ -317,14 +317,15 @@ func (h *Harness) buildRunArgs(
 	args = append(args, dockerCfg.Image)
 
 	// Args after the image become the container's CMD. If Entrypoint is
-	// set, prepend the rest of its argv first, then the Command.
+	// set we still need to forward its tail args. If neither Entrypoint
+	// nor Command is configured we deliberately pass nothing so the
+	// image's baked CMD is used (e.g. the synapbus-agent image's
+	// /usr/local/bin/synapbus-agent-wrapper.sh).
 	if len(dockerCfg.Entrypoint) > 1 {
 		args = append(args, dockerCfg.Entrypoint[1:]...)
 	}
 	if len(dockerCfg.Command) > 0 {
 		args = append(args, dockerCfg.Command...)
-	} else {
-		args = append(args, "/workspace/wrapper.sh")
 	}
 
 	return args, nil
@@ -502,16 +503,21 @@ func buildEnvMap(req *harness.ExecRequest, cfg subprocess.AgentConfig) map[strin
 }
 
 // currentUserSpec returns "uid:gid" for the host user so files written
-// inside the bind-mount land with sane ownership instead of root. Only
-// meaningful on Linux; on Docker Desktop (mac) the bind-mount layer
-// handles ownership translation transparently but passing --user is
-// still a defence-in-depth measure.
+// inside the bind-mount land with sane ownership instead of root. On
+// Linux this is a defence-in-depth measure (and also enables sane
+// ownership on host bind-mounts). On macOS Docker Desktop the
+// virtio-fs/gRPC FUSE layer handles ownership translation regardless
+// so we leave it empty and let the image's USER directive apply —
+// which keeps /etc/passwd in agreement with the runtime user and
+// avoids gemini-cli's keychain init failing on uv_os_get_passwd
+// ENOENT for an unknown uid.
 func currentUserSpec() string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
 	uid := os.Getuid()
 	gid := os.Getgid()
 	if uid <= 0 {
-		// fall through to image default if we can't discover (e.g.
-		// running on Windows or under a daemon without /proc).
 		return ""
 	}
 	return fmt.Sprintf("%d:%d", uid, gid)

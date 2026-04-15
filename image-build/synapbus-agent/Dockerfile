@@ -55,15 +55,29 @@ RUN npm install -g \
 # permission errors.
 RUN groupadd -g 1000 agent && useradd -u 1000 -g 1000 -m -s /bin/bash agent
 
+# Standard wrapper script, baked into the image at a stable path. Every
+# bundled example uses this same wrapper:
+#   1. read message.json from the bind-mounted /workspace
+#   2. read GEMINI.md (or CLAUDE.md if AGENT_CLI=claude)
+#   3. invoke the agent CLI in --approval-mode yolo with the prompt
+#   4. exit
+#
+# All side effects (sending DMs, creating goals, propose_task_tree)
+# are performed by the agent CLI through MCP tool calls — the wrapper
+# itself never shells out to the SynapBus admin socket. This keeps
+# isolation strict: the container only sees the host through MCP HTTP.
+#
+# Examples that need different dispatch logic override CMD via
+# harness_config_json.docker.command.
+COPY synapbus-agent-wrapper.sh /usr/local/bin/synapbus-agent-wrapper.sh
+RUN chmod +x /usr/local/bin/synapbus-agent-wrapper.sh
+
 # Use tini as PID 1 so:
-#   * SIGTERM from `docker stop` reaches our wrapper.sh
+#   * SIGTERM from `docker stop` reaches our wrapper
 #   * Zombie node/python child processes get reaped properly
 # Wrappers can override the entrypoint via harness_config_json.docker.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Default: run /workspace/wrapper.sh (the convention every example
-# follows). Overridden via harness_config_json.docker.command when
-# you want a different entry script.
 WORKDIR /workspace
 USER 1000:1000
-CMD ["/workspace/wrapper.sh"]
+CMD ["/usr/local/bin/synapbus-agent-wrapper.sh"]

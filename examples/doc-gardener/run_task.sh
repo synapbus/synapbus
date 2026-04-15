@@ -1,17 +1,17 @@
 #!/bin/bash
-# run_task.sh — kick off the real multi-agent doc-gardener demo.
+# run_task.sh — send a doc-verification goal DM from algis to
+# doc-coordinator and wait for the FINAL: reply that flows back from
+# docs-critic. The whole flow is driven by MCP tool calls inside three
+# Docker-isolated agent containers — nothing here writes to the DB
+# directly.
 #
-# Sends a single DM from algis to doc-gardener-coordinator. The
-# reactor picks it up, fires a subprocess running `docgardener agent`,
-# which creates the goal, materializes the task tree, spawns the 3
-# specialists (dynamically — they didn't exist before this run), and
-# DMs each to claim its task. Every specialist fires its own reactor
-# run, does real subprocess work, posts artifacts, and DMs the
-# coordinator back. The coordinator's completion handler waits until
-# all tasks resolve, then DMs algis with FINAL: summary.
+# Usage:
+#   ./run_task.sh                                 # default doc-gardener brief
+#   ./run_task.sh "your custom goal here"
 #
-# Nothing in this script touches the DB directly — the whole demo is
-# driven by SynapBus messaging + the reactor.
+# The default brief asks the inspector to verify mcpproxy CLI flag
+# documentation against the actual binary. Override with any free-form
+# brief — the coordinator triages it.
 
 set -euo pipefail
 
@@ -19,47 +19,73 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$SCRIPT_DIR/bin/synapbus"
 SOCKET="$SCRIPT_DIR/data/synapbus.sock"
 
-cd "$SCRIPT_DIR"
+DEFAULT_GOAL='Verify the CLI commands listed on https://docs.mcpproxy.app/cli/command-reference still exist in the current mcpproxy binary. Install mcpproxy in the sandbox first (releases at https://github.com/smart-mcp-proxy/mcpproxy-go/releases — pick the linux-arm64 or linux-amd64 variant matching `uname -m`). For each documented command, check whether `mcpproxy --help` and `mcpproxy <command> --help` show it; flag any drift, missing commands, or doc claims that no longer match. Produce a patch suggestion list.'
+
+GOAL="${1:-$DEFAULT_GOAL}"
 
 say() { printf '\033[1;36m[run]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[run][FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
 
-if [ ! -x "$BIN" ]; then
-    die "synapbus binary not found at $BIN — run ./start.sh first"
-fi
-if [ ! -S "$SOCKET" ]; then
-    die "admin socket not found at $SOCKET — is synapbus running?"
-fi
+[ -x "$BIN" ] || die "synapbus binary not found at $BIN — run ./start.sh first"
+[ -S "$SOCKET" ] || die "admin socket missing — is synapbus running?"
 
-GOAL_DESC='Verify every CLI flag and config option mentioned in docs.mcpproxy.app actually exists in the mcpproxy binary, flag any drift, and propose doc patches.'
+cd "$SCRIPT_DIR"
+DB="$SCRIPT_DIR/data/synapbus.db"
 
-say "sending kickoff DM: algis → doc-gardener-coordinator"
-printf '%s' "$GOAL_DESC" | "$BIN" --socket "$SOCKET" messages send \
+# Snapshot the current max message id so we only look at replies from
+# THIS run, not stale replies left from previous invocations.
+BASELINE=$(sqlite3 "$DB" "SELECT COALESCE(MAX(id), 0) FROM messages" 2>/dev/null || echo 0)
+
+say "sending goal DM: algis → doc-coordinator (baseline msg_id=$BASELINE)"
+printf '%s' "$GOAL" | "$BIN" --socket "$SOCKET" messages send \
     --from algis \
-    --to doc-gardener-coordinator \
+    --to doc-coordinator \
     --priority 8 >&2
 
-say "waiting for coordinator's FINAL: reply to algis (up to 120s)..."
-deadline=$(( $(date +%s) + 120 ))
-while [ $(date +%s) -lt $deadline ]; do
-    FINAL=$("$BIN" --socket "$SOCKET" messages list --to algis --limit 10 2>/dev/null \
-        | awk '/^FINAL: / {print; exit}')
-    if [ -n "${FINAL:-}" ]; then
-        say "coordinator reported: $FINAL"
-        break
+say "waiting for FINAL: / CANNOT: reply to algis (up to 600s)..."
+deadline=$(( $(date +%s) + 600 ))
+last_seen_id=$BASELINE
+
+while [ "$(date +%s)" -lt "$deadline" ]; do
+    NEW_LINES=$(sqlite3 -separator '|' "$DB" "
+        SELECT id, from_agent, replace(substr(body, 1, 280), char(10), ' ')
+        FROM messages
+        WHERE to_agent = 'algis'
+          AND from_agent != 'algis'
+          AND id > $last_seen_id
+        ORDER BY id ASC
+    " 2>/dev/null || true)
+
+    if [ -n "$NEW_LINES" ]; then
+        while IFS='|' read -r id from body; do
+            [ -z "$id" ] && continue
+            say "← [$from #$id] $body"
+            last_seen_id=$id
+            case "$body" in
+                DELEGATED:*|REVISING:*)
+                    ;;  # informational, keep waiting
+                *)
+                    if [ "$from" = "doc-coordinator" ] || \
+                       [ "${body#FINAL:}" != "$body" ] || \
+                       [ "${body#CANNOT:}" != "$body" ]; then
+                        say "terminal response received"
+                        # Persist last goal id for ./report.sh.
+                        GOAL_ID=$(sqlite3 "$DB" 'SELECT id FROM goals ORDER BY id DESC LIMIT 1' 2>/dev/null || echo)
+                        if [ -n "$GOAL_ID" ]; then
+                            echo "$GOAL_ID" > "$SCRIPT_DIR/.last_goal_id"
+                            say "goal id = $GOAL_ID — render with ./report.sh"
+                        fi
+                        exit 0
+                    fi
+                    ;;
+            esac
+        done <<EOF
+$NEW_LINES
+EOF
     fi
     sleep 1
 done
 
-# Find the latest goal id for the report step.
-GOAL_ID=$(sqlite3 "$SCRIPT_DIR/data/synapbus.db" 'SELECT id FROM goals ORDER BY id DESC LIMIT 1')
-if [ -n "$GOAL_ID" ]; then
-    echo "$GOAL_ID" > "$SCRIPT_DIR/.last_goal_id"
-    say "goal id = $GOAL_ID"
-fi
-
-say "done. render the report with:"
-echo "  ./report.sh"
-echo
-say "Agent Runs:  http://localhost:18089/runs"
-say "Agents:      http://localhost:18089/agents"
+say "timed out waiting for terminal response (FINAL: or CANNOT:)"
+say "check http://localhost:18089/runs and http://localhost:18089/goals"
+exit 2
