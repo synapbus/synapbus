@@ -60,6 +60,23 @@ RUN npm install -g \
 # permission errors.
 RUN groupadd -g 1000 agent && useradd -u 1000 -g 1000 -m -s /bin/bash agent
 
+# Pre-create credential mount points so --read-only + bind mounts work.
+# The docker harness mounts individual auth files (not entire dirs) to
+# avoid carrying the host's settings.json / MCP configs into containers.
+# Placeholder files are needed because Docker file bind mounts require
+# the target to exist (especially with --read-only root).
+# The .claude.json onboarding file prevents Claude Code from prompting
+# for theme/auth setup in headless mode (required even with OAuth token).
+# The settings.json pre-selects oauth-personal auth so Gemini CLI uses
+# the mounted OAuth tokens without interactive prompts.
+RUN mkdir -p /home/agent/.gemini /home/agent/.claude \
+    && touch /home/agent/.gemini/oauth_creds.json \
+              /home/agent/.gemini/google_accounts.json \
+              /home/agent/.claude/.credentials.json \
+    && echo '{"hasCompletedOnboarding":true}' > /home/agent/.claude.json \
+    && printf '{"security":{"auth":{"selectedType":"oauth-personal"}}}\n' > /home/agent/.gemini/settings.json \
+    && chown -R agent:agent /home/agent/.gemini /home/agent/.claude /home/agent/.claude.json
+
 # Standard wrapper script, baked into the image at a stable path. Every
 # bundled example uses this same wrapper:
 #   1. read message.json from the bind-mounted /workspace

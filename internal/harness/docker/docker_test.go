@@ -147,6 +147,165 @@ echo "wrapper done"
 	}
 }
 
+// TestExecute_CredentialMounts verifies host credential directories are
+// bind-mounted read-only into the container and HOME is set correctly.
+func TestExecute_CredentialMounts(t *testing.T) {
+	if err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+		t.Skip("docker daemon not available, skipping")
+	}
+
+	fakeHome := t.TempDir()
+	geminiDir := filepath.Join(fakeHome, ".gemini")
+	claudeDir := filepath.Join(fakeHome, ".claude")
+	if err := os.MkdirAll(geminiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(geminiDir, "oauth_creds.json"), []byte(`{"test":"gemini"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"test":"claude"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := t.TempDir()
+	h := docker.New(docker.Config{
+		BaseDir:              base,
+		KeepWorkdirOnSuccess: true,
+		MountHostCredentials: true,
+		HostHomeDir:          fakeHome,
+	}, nil)
+
+	readOnlyFalse := false
+	cfgJSON, _ := json.Marshal(map[string]any{
+		"docker": map[string]any{
+			"image":          "alpine:3.20",
+			"command":        []string{"sh", "/workspace/wrapper.sh"},
+			"network":        "none",
+			"read_only_root": readOnlyFalse,
+		},
+	})
+	agent := &agents.Agent{
+		Name:              "cred-test",
+		HarnessConfigJSON: string(cfgJSON),
+	}
+
+	runDir := filepath.Join(base, "cred-test")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := `#!/bin/sh
+set -eu
+echo "HOME=$HOME"
+cat /home/agent/.gemini/oauth_creds.json 2>&1 || echo "GEMINI_MISSING"
+cat /home/agent/.claude/.credentials.json 2>&1 || echo "CLAUDE_MISSING"
+echo "GEMINI_DEFAULT_AUTH_TYPE=${GEMINI_DEFAULT_AUTH_TYPE:-unset}"
+echo "GEMINI_CLI_NO_RELAUNCH=${GEMINI_CLI_NO_RELAUNCH:-unset}"
+# Home dir should be writable (staged copy, not RO mount).
+if touch /home/agent/.gemini/projects.json 2>/dev/null; then
+    echo "HOME_WRITABLE"
+else
+    echo "HOME_READ_ONLY"
+fi
+# settings.json and .claude.json should be auto-generated.
+cat /home/agent/.gemini/settings.json 2>&1 || echo "SETTINGS_MISSING"
+cat /home/agent/.claude.json 2>&1 || echo "ONBOARDING_MISSING"
+`
+	if err := os.WriteFile(filepath.Join(runDir, "wrapper.sh"), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := h.Execute(context.Background(), &harness.ExecRequest{
+		RunID:     "cred-test",
+		AgentName: agent.Name,
+		Agent:     agent,
+		Budget:    harness.Budget{MaxWallClock: 30 * time.Second},
+	})
+	if err != nil {
+		logs := ""
+		if res != nil {
+			logs = res.Logs
+		}
+		t.Fatalf("Execute: %v\nlogs: %s", err, logs)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d\nlogs: %s", res.ExitCode, res.Logs)
+	}
+	if !strings.Contains(res.Logs, `"test":"gemini"`) {
+		t.Errorf("gemini oauth_creds.json not visible:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, `"test":"claude"`) {
+		t.Errorf("claude .credentials.json not visible:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, "HOME_WRITABLE") {
+		t.Errorf("agent home should be writable:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, "oauth-personal") {
+		t.Errorf("gemini settings.json missing auth type:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, "hasCompletedOnboarding") {
+		t.Errorf(".claude.json onboarding flag missing:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, "HOME=/home/agent") {
+		t.Errorf("HOME not set correctly:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, "GEMINI_DEFAULT_AUTH_TYPE=oauth-personal") {
+		t.Errorf("GEMINI_DEFAULT_AUTH_TYPE not set:\n%s", res.Logs)
+	}
+	if !strings.Contains(res.Logs, "GEMINI_CLI_NO_RELAUNCH=true") {
+		t.Errorf("GEMINI_CLI_NO_RELAUNCH not set:\n%s", res.Logs)
+	}
+}
+
+// TestExecute_CredentialMounts_MissingDirs verifies that missing
+// credential directories on the host are silently skipped.
+func TestExecute_CredentialMounts_MissingDirs(t *testing.T) {
+	if err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+		t.Skip("docker daemon not available, skipping")
+	}
+
+	fakeHome := t.TempDir() // empty — no .gemini or .claude
+
+	base := t.TempDir()
+	h := docker.New(docker.Config{
+		BaseDir:              base,
+		KeepWorkdirOnSuccess: true,
+		MountHostCredentials: true,
+		HostHomeDir:          fakeHome,
+	}, nil)
+
+	cfgJSON, _ := json.Marshal(map[string]any{
+		"docker": map[string]any{
+			"image":   "alpine:3.20",
+			"command": []string{"echo", "ok"},
+			"network": "none",
+		},
+	})
+	agent := &agents.Agent{
+		Name:              "no-creds",
+		HarnessConfigJSON: string(cfgJSON),
+	}
+
+	res, err := h.Execute(context.Background(), &harness.ExecRequest{
+		RunID:     "no-creds",
+		AgentName: agent.Name,
+		Agent:     agent,
+		Budget:    harness.Budget{MaxWallClock: 30 * time.Second},
+	})
+	if err != nil {
+		logs := ""
+		if res != nil {
+			logs = res.Logs
+		}
+		t.Fatalf("Execute: %v\nlogs: %s", err, logs)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d — should succeed even without credential dirs\nlogs: %s", res.ExitCode, res.Logs)
+	}
+}
+
 // TestExecute_NoImage verifies the backend rejects agents whose
 // harness_config_json lacks docker.image rather than silently picking
 // some default.

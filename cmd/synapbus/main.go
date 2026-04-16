@@ -533,6 +533,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		BaseDir:              filepath.Join(dataDir, "harness", "docker"),
 		KeepWorkdirOnSuccess: keepWorkdir,
 		HostMCPPort:          port,
+		MountHostCredentials: true,
 	}, slog.Default()))
 	harnessRunsStore := runs.New(db.DB, slog.Default())
 	harnessRegistry.Observer = harnessRunsStore

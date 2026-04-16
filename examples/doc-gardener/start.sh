@@ -54,15 +54,14 @@ if ! docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
     die "docker daemon unreachable — start Docker Desktop / dockerd first" 3
 fi
 
-# Auth: prefer GEMINI_API_KEY (passed as -e to each container). Fall
-# back to mounting the host's ~/.gemini directory read-only at
-# /home/agent/.gemini so the in-container gemini sees the same OAuth
-# creds you authenticated with locally. Either path works; require at
-# least one.
+# Auth: prefer GEMINI_API_KEY (passed as -e to each container). When
+# absent the docker harness auto-mounts ~/.gemini/ read-only at
+# /home/agent/.gemini and sets GEMINI_DEFAULT_AUTH_TYPE=oauth-personal,
+# so the in-container Gemini CLI reuses the host's OAuth session.
 GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 if [ -z "$GEMINI_API_KEY" ]; then
     if [ -f "$HOME/.gemini/oauth_creds.json" ]; then
-        say "no GEMINI_API_KEY set — falling back to mounting $HOME/.gemini ro into containers"
+        say "no GEMINI_API_KEY — harness will auto-mount host OAuth creds (MountHostCredentials)"
     else
         die "no Gemini auth available.
        Either:
@@ -182,28 +181,11 @@ COORDINATOR_APIKEY=$(mint_key doc-coordinator)
 INSPECTOR_APIKEY=$(mint_key docs-inspector)
 CRITIC_APIKEY=$(mint_key docs-critic)
 
-# Per-agent HOME inside the container. The synapbus-agent image creates
-# /home/agent owned by uid 1000, but the docker harness invokes
-# `--user <host-uid>:<host-gid>` so the runtime user is the host's
-# (e.g. uid 501 on macOS). That host user can't write to /home/agent
-# without help. We solve it by mounting a host directory at /home/agent
-# read-write — gemini gets a fully writable HOME with whatever auth
-# state it needs.
-#
-# With GEMINI_API_KEY the writable HOME stays empty (gemini just uses
-# the env var). With OAuth fallback we seed it with a copy of the
-# host's ~/.gemini so the in-container gemini sees the same OAuth
-# tokens. Mutations stay in the example data dir; the host's ~/.gemini
-# is untouched.
-AGENT_HOME="$DATA_DIR/agent-home"
-say "preparing per-agent writable HOME at $AGENT_HOME"
-rm -rf "$AGENT_HOME"
-mkdir -p "$AGENT_HOME"
-if [ -z "$GEMINI_API_KEY" ]; then
-    say "seeding $AGENT_HOME/.gemini from $HOME/.gemini (OAuth fallback)"
-    cp -R "$HOME/.gemini" "$AGENT_HOME/.gemini"
-fi
-EXTRA_MOUNTS_JSON='[{"source":"'"$AGENT_HOME"'","target":"/home/agent","read_only":false}]'
+# Credential mounting is handled automatically by the docker harness
+# (MountHostCredentials=true). It mounts ~/.gemini and ~/.claude RO
+# at /home/agent/ and sets HOME=/home/agent + GEMINI_DEFAULT_AUTH_TYPE.
+# No manual HOME seeding needed.
+EXTRA_MOUNTS_JSON='[]'
 
 # --- apply per-agent harness config -----------------------------------
 apply_config() {
@@ -221,6 +203,10 @@ apply_config() {
         -e "s|__GEMINI_API_KEY__|${GEMINI_API_KEY}|g" \
         -e "s|__EXTRA_MOUNTS__|${EXTRA_MOUNTS_JSON}|g" \
         "$config_path" > "$tmp"
+    # Strip empty GEMINI_API_KEY so it doesn't shadow OAuth auth.
+    if [ -z "$GEMINI_API_KEY" ]; then
+        jq 'del(.env.GEMINI_API_KEY)' "$tmp" > "${tmp}.clean" && mv "${tmp}.clean" "$tmp"
+    fi
     # Set harness_name explicitly so the resolver picks docker even
     # though local_command is empty. The docker block also satisfies
     # auto-detection but explicit is safer.

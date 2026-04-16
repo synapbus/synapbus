@@ -51,6 +51,16 @@ type Config struct {
 	// DockerBin is the path to the docker CLI. Empty = "docker" from
 	// PATH. Override for podman or a wrapper script.
 	DockerBin string
+
+	// MountHostCredentials enables automatic read-only mounting of host
+	// CLI credential directories (~/.gemini, ~/.claude) into the
+	// container at /home/agent/<dir>. Lets containerized agents reuse
+	// the host's OAuth sessions (Gemini Pro, Claude Pro subscriptions).
+	MountHostCredentials bool
+
+	// HostHomeDir is the host home directory used to resolve credential
+	// paths. Empty defaults to os.UserHomeDir().
+	HostHomeDir string
 }
 
 // AgentConfig is the per-agent docker block parsed from

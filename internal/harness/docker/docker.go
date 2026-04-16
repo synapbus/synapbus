@@ -300,9 +300,34 @@ func (h *Harness) buildRunArgs(
 		args = append(args, "--mount", spec)
 	}
 
+	// Auto-mount staged host credentials into a writable /home/agent.
+	// The harness copies auth files (not entire config dirs) into
+	// workdir/agent-home/ and mounts that RW so the agent CLIs can
+	// write state files (projects.json, history, etc.) alongside them.
+	var credResult credentialMountResult
+	if h.cfg.MountHostCredentials {
+		credResult = stageHostCredentials(workdir, h.cfg.HostHomeDir)
+		if credResult.Staged {
+			agentHome := filepath.Join(workdir, "agent-home")
+			spec := fmt.Sprintf("type=bind,source=%s,target=/home/agent", agentHome)
+			args = append(args, "--mount", spec)
+			h.logger.Info("credential staging",
+				"agent_home", agentHome,
+				"gemini_oauth", credResult.HasGeminiOAuth,
+				"claude_creds", credResult.HasClaudeCreds)
+		}
+	}
+
 	// Environment variables — caller-provided + harness-injected. Pass
 	// through as -e KEY=VALUE; sort for deterministic output.
 	envMap := buildEnvMap(req, subCfg)
+	if h.cfg.MountHostCredentials {
+		envMap["HOME"] = "/home/agent"
+		if credResult.HasGeminiOAuth {
+			envMap["GEMINI_DEFAULT_AUTH_TYPE"] = "oauth-personal"
+			envMap["GEMINI_CLI_NO_RELAUNCH"] = "true"
+		}
+	}
 	keys := make([]string, 0, len(envMap))
 	for k := range envMap {
 		keys = append(keys, k)
@@ -555,6 +580,80 @@ func readFileSafe(path string) string {
 		return ""
 	}
 	return string(raw)
+}
+
+type credentialMountResult struct {
+	Staged         bool
+	HasGeminiOAuth bool
+	HasClaudeCreds bool
+}
+
+// stageHostCredentials copies individual auth token files into
+// workdir/agent-home/ which is then bind-mounted RW at /home/agent.
+// Only auth files are copied — NOT the host's settings.json or MCP
+// configs (which would have stale localhost URLs that hang Gemini CLI).
+// The agent-home dir is writable so CLIs can create projects.json,
+// history/, etc. alongside the staged auth files.
+func stageHostCredentials(workdir, hostHome string) credentialMountResult {
+	var result credentialMountResult
+	if hostHome == "" {
+		var err error
+		hostHome, err = os.UserHomeDir()
+		if err != nil {
+			return result
+		}
+	}
+
+	agentHome := filepath.Join(workdir, "agent-home")
+
+	type credFile struct {
+		hostRel string // relative to home on host
+		dstRel  string // relative to agent-home
+	}
+	files := []credFile{
+		{".gemini/oauth_creds.json", ".gemini/oauth_creds.json"},
+		{".gemini/google_accounts.json", ".gemini/google_accounts.json"},
+		{".claude/.credentials.json", ".claude/.credentials.json"},
+	}
+
+	for _, f := range files {
+		src := filepath.Join(hostHome, f.hostRel)
+		raw, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		dst := filepath.Join(agentHome, f.dstRel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			continue
+		}
+		if err := os.WriteFile(dst, raw, 0o600); err != nil {
+			continue
+		}
+		result.Staged = true
+		switch {
+		case strings.HasSuffix(f.hostRel, "oauth_creds.json") && strings.Contains(f.hostRel, ".gemini"):
+			result.HasGeminiOAuth = true
+		case strings.HasSuffix(f.hostRel, ".credentials.json"):
+			result.HasClaudeCreds = true
+		}
+	}
+
+	if result.Staged {
+		// Write a minimal settings.json so Gemini CLI uses OAuth
+		// without interactive prompts. MCP config comes from the
+		// workspace's .gemini/settings.json (CWD takes precedence).
+		geminiSettings := filepath.Join(agentHome, ".gemini", "settings.json")
+		if _, err := os.Stat(geminiSettings); errors.Is(err, os.ErrNotExist) {
+			_ = os.MkdirAll(filepath.Dir(geminiSettings), 0o755)
+			_ = os.WriteFile(geminiSettings, []byte(`{"security":{"auth":{"selectedType":"oauth-personal"}}}`+"\n"), 0o644)
+		}
+		// Claude Code onboarding flag — prevents setup prompts.
+		claudeJSON := filepath.Join(agentHome, ".claude.json")
+		if _, err := os.Stat(claudeJSON); errors.Is(err, os.ErrNotExist) {
+			_ = os.WriteFile(claudeJSON, []byte(`{"hasCompletedOnboarding":true}`+"\n"), 0o644)
+		}
+	}
+	return result
 }
 
 func mergeLogs(out, errb *bytes.Buffer, cap int) string {
