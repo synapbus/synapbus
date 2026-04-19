@@ -30,11 +30,13 @@ Returns the registry state for all plugins.
 
 Error shapes: standard `{"error":"…"}` with appropriate HTTP status.
 
-### `POST /api/plugins/{name}/enable` (admin only)
+### `POST /api/admin/plugins/{name}/enable` (admin only)
 
-Sets `plugins.<name>.enabled: true` in `synapbus.yaml` and sends self-SIGHUP. Returns 202 Accepted with `{"restart": true}`; operator observes the graceful restart.
+Sets `plugins.<name>.enabled: true` in `synapbus.yaml` and sends self-SIGHUP. Returns 200 with `{"restart": true}`; operator observes the graceful restart.
 
-### `POST /api/plugins/{name}/disable` (admin only)
+NOTE: admin endpoints are under `/api/admin/plugins/` rather than `/api/plugins/` to avoid URL collisions with per-plugin routes mounted at `/api/plugins/<name>/`.
+
+### `POST /api/admin/plugins/{name}/disable` (admin only)
 
 Sets `plugins.<name>.enabled: false` in `synapbus.yaml` and sends self-SIGHUP.
 
