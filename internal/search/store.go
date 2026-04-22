@@ -135,14 +135,17 @@ func (s *EmbeddingStore) Dequeue(ctx context.Context, batchSize int) ([]QueueIte
 	}
 
 	// Mark as processing
-	for _, id := range ids {
-		_, err := tx.ExecContext(ctx,
-			`UPDATE embedding_queue SET status = 'processing', attempts = attempts + 1 WHERE id = ?`,
-			id,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("mark processing: %w", err)
-		}
+	query := fmt.Sprintf(
+		`UPDATE embedding_queue SET status = 'processing', attempts = attempts + 1 WHERE id IN (%s)`,
+		makePlaceholders(len(ids)),
+	)
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	_, err = tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("mark processing: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -259,6 +262,20 @@ type EmbeddingStatsResult struct {
 	PendingCount  int64  `json:"pending_count"`
 	FailedCount   int64  `json:"failed_count"`
 	Dimensions    int    `json:"dimensions"`
+}
+
+func makePlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	b := make([]byte, n*2-1)
+	for i := 0; i < n; i++ {
+		b[i*2] = '?'
+		if i < n-1 {
+			b[i*2+1] = ','
+		}
+	}
+	return string(b)
 }
 
 // Stats returns aggregate embedding statistics.
