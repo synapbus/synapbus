@@ -12,6 +12,14 @@ type SendOptions struct {
 }
 
 // ReadOptions configures inbox reading behavior.
+//
+// Read state is now an explicit, opt-in side effect. Callers that want the
+// historical "fetch unread + mark them read" worker-queue behavior must set
+// both IncludeRead=false (filter to unread) and MarkRead=true (advance the
+// per-conversation read pointer). The default behavior is a pure peek that
+// never mutates inbox state — this keeps read_inbox idempotent under retries
+// and prevents it from racing with the claim/process/done loop and the
+// StalemateWorker (see #bugs-synapbus message 30674).
 type ReadOptions struct {
 	Status         string `json:"status,omitempty"`
 	FromAgent      string `json:"from_agent,omitempty"`
@@ -22,6 +30,10 @@ type ReadOptions struct {
 	After          string `json:"after,omitempty"`
 	Before         string `json:"before,omitempty"`
 	IncludeRead    bool   `json:"include_read,omitempty"`
+	// MarkRead, when true, advances the per-conversation read pointer for the
+	// returned messages. When false (the default) ReadInbox is a pure peek and
+	// does not mutate any state.
+	MarkRead bool `json:"mark_read,omitempty"`
 }
 
 // SearchOptions configures message search behavior.

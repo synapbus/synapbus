@@ -222,8 +222,8 @@ func TestMessagingService_ReadInbox_ReadUnread(t *testing.T) {
 		t.Fatalf("SendMessage: %v", err)
 	}
 
-	// First read
-	result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{})
+	// Worker-queue path: explicit MarkRead advances the read pointer.
+	result, err := svc.ReadInbox(ctx, "receiver", ReadOptions{MarkRead: true})
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestMessagingService_ReadInbox_ReadUnread(t *testing.T) {
 		t.Fatal("expected messages on first read")
 	}
 
-	// Second read without include_read
+	// Second read without include_read — read pointer was advanced, so 0.
 	result, err = svc.ReadInbox(ctx, "receiver", ReadOptions{})
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
@@ -240,13 +240,66 @@ func TestMessagingService_ReadInbox_ReadUnread(t *testing.T) {
 		t.Errorf("got %d messages on second read (no include_read), want 0", len(result.Messages))
 	}
 
-	// With include_read
+	// With include_read — sees the marked-read messages too.
 	result, err = svc.ReadInbox(ctx, "receiver", ReadOptions{IncludeRead: true})
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
 	}
 	if len(result.Messages) != 2 {
 		t.Errorf("got %d messages with include_read, want 2", len(result.Messages))
+	}
+}
+
+// TestMessagingService_ReadInbox_NonDestructiveDefault verifies that the
+// default ReadInbox call is a pure peek and does not mutate inbox read state.
+// This is the bug-30674 regression test: agents calling read_inbox repeatedly
+// must see the same unread messages until they explicitly opt in to MarkRead
+// or use the claim/process/done loop. The destructive default raced against
+// the StalemateWorker by silently advancing the per-conversation read pointer
+// while a message was still being claimed and processed.
+func TestMessagingService_ReadInbox_NonDestructiveDefault(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.SendMessage(ctx, "sender", "receiver", "msg 1", SendOptions{Priority: 3}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if _, err := svc.SendMessage(ctx, "sender", "receiver", "msg 2", SendOptions{Priority: 8}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		opts ReadOptions
+	}{
+		{"default options", ReadOptions{}},
+		{"with limit", ReadOptions{Limit: 10}},
+		{"with from_agent filter", ReadOptions{FromAgent: "sender"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			first, err := svc.ReadInbox(ctx, "receiver", tc.opts)
+			if err != nil {
+				t.Fatalf("first ReadInbox: %v", err)
+			}
+			if len(first.Messages) != 2 {
+				t.Fatalf("first read returned %d messages, want 2", len(first.Messages))
+			}
+
+			second, err := svc.ReadInbox(ctx, "receiver", tc.opts)
+			if err != nil {
+				t.Fatalf("second ReadInbox: %v", err)
+			}
+			if len(second.Messages) != len(first.Messages) {
+				t.Errorf("second read returned %d messages, want %d (read_inbox must be idempotent by default)",
+					len(second.Messages), len(first.Messages))
+			}
+			if second.Total != first.Total {
+				t.Errorf("second read total = %d, want %d (totals must match across idempotent calls)",
+					second.Total, first.Total)
+			}
+		})
 	}
 }
 

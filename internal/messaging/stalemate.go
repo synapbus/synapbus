@@ -221,16 +221,33 @@ func (w *StalemateWorker) failTimedOutProcessing(ctx context.Context) int64 {
 		metadata := map[string]any{"error": "claim timeout exceeded"}
 		metaBytes, _ := json.Marshal(metadata)
 
-		// Update directly via DB since the store's UpdateMessageStatus requires the claiming agent
-		_, err := w.db.ExecContext(ctx,
+		// Update directly via DB since the store's UpdateMessageStatus requires
+		// the claiming agent. The UPDATE re-checks both status='processing' AND
+		// claimed_at < cutoff to close a TOCTOU window between the SELECT above
+		// and this UPDATE: if a legitimate claimer ran mark_done (status flip)
+		// or a fresh claim_messages refreshed claimed_at between the two, this
+		// no-ops instead of stomping live work. RowsAffected = 0 is the signal
+		// the row escaped the stale window before the worker reached it.
+		res, err := w.db.ExecContext(ctx,
 			`UPDATE messages SET status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP
-			 WHERE id = ? AND status = 'processing'`,
-			StatusFailed, string(metaBytes), dm.ID,
+			 WHERE id = ? AND status = 'processing' AND claimed_at < ?`,
+			StatusFailed, string(metaBytes), dm.ID, cutoff,
 		)
 		if err != nil {
 			w.logger.Error("auto-fail message failed",
 				"message_id", dm.ID,
 				"error", err,
+			)
+			continue
+		}
+		affected, _ := res.RowsAffected()
+		if affected == 0 {
+			// Message was reclaimed, completed, or otherwise moved out of the
+			// stale window between SELECT and UPDATE. Skip silently — the
+			// next worker tick will re-evaluate.
+			w.logger.Debug("stale processing message no longer stale; skipped",
+				"message_id", dm.ID,
+				"claimed_by", dm.ClaimedBy,
 			)
 			continue
 		}

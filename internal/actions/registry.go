@@ -85,23 +85,28 @@ func allActions() []Action {
 		{
 			Name:        "read_inbox",
 			Category:    "messaging",
-			Description: "Check your message inbox for pending messages. Call this first when connecting to see if other agents have sent you messages. Returns unread/pending direct messages addressed to you.",
+			Description: "Peek at your message inbox. Idempotent and side-effect free by default — does not mark messages as read or change inbox state. Pass mark_read: true to advance the read pointer past the returned messages (legacy worker-queue behavior). To process messages with a lock, use claim_messages + mark_done instead.",
 			Params: []Param{
 				{Name: "limit", Type: "number", Description: "Maximum number of messages to return (default 50)", Default: "50"},
 				{Name: "status_filter", Type: "string", Description: "Filter by message status: pending, processing, done, failed"},
 				{Name: "include_read", Type: "boolean", Description: "Include previously read messages (default false)", Default: "false"},
+				{Name: "mark_read", Type: "boolean", Description: "Advance the read pointer past returned messages (default false; pure peek)", Default: "false"},
 				{Name: "min_priority", Type: "number", Description: "Minimum priority filter (1-10)"},
 				{Name: "from_agent", Type: "string", Description: "Filter by sender agent name"},
 			},
 			Returns: "JSON with messages array and count",
 			Examples: []Example{
 				{
-					Description: "Check for new messages",
+					Description: "Peek at unread messages without consuming them",
 					Code:        `call("read_inbox", {})`,
 				},
 				{
 					Description: "Read high-priority messages from a specific agent",
 					Code:        `call("read_inbox", {"min_priority": 8, "from_agent": "coordinator"})`,
+				},
+				{
+					Description: "Legacy worker-queue: fetch unread and mark them read",
+					Code:        `call("read_inbox", {"mark_read": true})`,
 				},
 			},
 		},

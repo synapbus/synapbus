@@ -247,7 +247,17 @@ func (s *MessagingService) SendMessage(ctx context.Context, from, to, body strin
 	return msg, nil
 }
 
-// ReadInbox returns messages for an agent and advances the read position.
+// ReadInbox returns messages for an agent. By default this is a pure peek and
+// does not mutate any state. When opts.MarkRead is true the per-conversation
+// read pointer is advanced past the returned messages — this is the explicit
+// opt-in for the historical "fetch unread + mark read" worker-queue flow.
+//
+// Splitting the read-state side effect from the fetch fixes a race against the
+// claim/process/done loop and the StalemateWorker: a destructive default meant
+// that `read_inbox` calls between `claim_messages` and `mark_done` could move
+// the read pointer past messages that the StalemateWorker still needed to
+// reason about, producing inconsistent views across `read_inbox`, `my_status`,
+// and the worker's reminder/escalation queries (see bug 30674).
 func (s *MessagingService) ReadInbox(ctx context.Context, agentName string, opts ReadOptions) (*PaginatedMessages, error) {
 	messages, err := s.store.GetInboxMessages(ctx, agentName, opts)
 	if err != nil {
@@ -264,33 +274,38 @@ func (s *MessagingService) ReadInbox(ctx context.Context, agentName string, opts
 		limit = 50
 	}
 
-	// Advance inbox state for each conversation
-	conversationMaxID := make(map[int64]int64)
-	for _, msg := range messages {
-		if msg.ID > conversationMaxID[msg.ConversationID] {
-			conversationMaxID[msg.ConversationID] = msg.ID
+	if opts.MarkRead {
+		// Advance inbox state for each conversation, taking the max returned
+		// message ID per conversation as the new read watermark.
+		conversationMaxID := make(map[int64]int64)
+		for _, msg := range messages {
+			if msg.ID > conversationMaxID[msg.ConversationID] {
+				conversationMaxID[msg.ConversationID] = msg.ID
+			}
 		}
-	}
 
-	for convID, maxMsgID := range conversationMaxID {
-		if err := s.store.UpdateInboxState(ctx, agentName, convID, maxMsgID); err != nil {
-			s.logger.Error("failed to update inbox state",
-				"agent", agentName,
-				"conversation_id", convID,
-				"error", err,
-			)
+		for convID, maxMsgID := range conversationMaxID {
+			if err := s.store.UpdateInboxState(ctx, agentName, convID, maxMsgID); err != nil {
+				s.logger.Error("failed to update inbox state",
+					"agent", agentName,
+					"conversation_id", convID,
+					"error", err,
+				)
+			}
 		}
 	}
 
 	s.logger.Info("inbox read",
 		"agent", agentName,
 		"message_count", len(messages),
+		"mark_read", opts.MarkRead,
 	)
 
 	if s.tracer != nil {
 		s.tracer.Record(ctx, agentName, "read_inbox", map[string]any{
 			"message_count": len(messages),
 			"include_read":  opts.IncludeRead,
+			"mark_read":     opts.MarkRead,
 		})
 	}
 

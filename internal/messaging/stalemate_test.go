@@ -136,6 +136,50 @@ func TestStalemateWorker_ProcessingTimeout_NotExpired(t *testing.T) {
 	}
 }
 
+// TestStalemateWorker_ProcessingTimeout_RaceGuard verifies that the
+// auto-fail UPDATE re-checks claimed_at < cutoff and won't stomp a row that
+// was legitimately re-claimed (claimed_at refreshed) between the worker's
+// SELECT scan and its row-by-row UPDATE. This guards the TOCTOU window
+// the stale-worker race depends on.
+func TestStalemateWorker_ProcessingTimeout_RaceGuard(t *testing.T) {
+	svc, db := newStalemateTestService(t)
+	ctx := context.Background()
+
+	// Insert a message that *was* stale at SELECT time.
+	oldClaimedAt := time.Now().Add(-25 * time.Hour)
+	msgID := insertStaleMessage(t, db, "sender", "receiver", "racing task",
+		StatusProcessing, time.Now().Add(-26*time.Hour), &oldClaimedAt, "receiver")
+
+	config := DefaultStalemateConfig()
+	config.ProcessingTimeout = 24 * time.Hour
+	lookup := &stubChannelLookup{channelID: 0, err: fmt.Errorf("no channel")}
+	worker := NewStalemateWorker(db, svc, lookup, config)
+
+	// Simulate the race: between the worker's SELECT (which would have picked
+	// this row) and its UPDATE, the legitimate claimer refreshes claimed_at to
+	// "now". With the cutoff predicate in place the UPDATE no-ops instead of
+	// silently failing live work.
+	freshClaimedAt := time.Now()
+	if _, err := db.ExecContext(ctx,
+		`UPDATE messages SET claimed_at = ? WHERE id = ?`,
+		freshClaimedAt, msgID,
+	); err != nil {
+		t.Fatalf("refresh claimed_at: %v", err)
+	}
+
+	worker.checkStaleMessages(ctx)
+
+	var status string
+	if err := db.QueryRowContext(ctx,
+		`SELECT status FROM messages WHERE id = ?`, msgID,
+	).Scan(&status); err != nil {
+		t.Fatalf("query message: %v", err)
+	}
+	if status != StatusProcessing {
+		t.Errorf("status = %q, want %q — re-claimed message must not be auto-failed", status, StatusProcessing)
+	}
+}
+
 func TestStalemateWorker_PendingReminder(t *testing.T) {
 	svc, db := newStalemateTestService(t)
 	ctx := context.Background()

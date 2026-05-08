@@ -241,12 +241,16 @@ func (b *ServiceBridge) callSendMessage(ctx context.Context, args map[string]any
 }
 
 func (b *ServiceBridge) callReadInbox(ctx context.Context, args map[string]any) (any, error) {
+	// read_inbox is a pure peek by default. Callers that want the legacy
+	// worker-queue behavior (fetch unread + advance the read pointer) must
+	// pass mark_read: true explicitly. See bug 30674.
 	opts := messaging.ReadOptions{
 		Limit:       getInt(args, "limit", 50),
 		Status:      getString(args, "status_filter", ""),
 		MinPriority: getInt(args, "min_priority", 0),
 		FromAgent:   getString(args, "from_agent", ""),
 		IncludeRead: getBool(args, "include_read", false),
+		MarkRead:    getBool(args, "mark_read", false),
 	}
 
 	page, err := b.msgService.ReadInbox(ctx, b.agentName, opts)
