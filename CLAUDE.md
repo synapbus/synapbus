@@ -112,6 +112,8 @@ make lint           # Run linters
 - SQLite via modernc.org/sqlite — new migration 015_reactive_triggers.sql (014-reactive-agent-triggers)
 - Go 1.25+ (per `go.mod`), no CGO, cross-compiled for `linux/amd64` + `darwin/arm64` + `mark3labs/mcp-go` (MCP tools), `go-chi/chi` (HTTP), `spf13/cobra` (CLI), `modernc.org/sqlite` (storage), `golang.org/x/crypto/nacl/secretbox` (secret encryption — pure Go, already in ecosystem), existing `SherClockHolmes/webpush-go`, `TFMV/hnsw`, `ory/fosite` (018-dynamic-agent-spawning)
 - SQLite via `modernc.org/sqlite` — five new migrations (`021_goals_tasks.sql`, `022_agent_proposals.sql`, `023_agent_trust_model.sql`, `024_secrets.sql`, `025_harness_runs_task_id.sql`); existing content-addressable attachment store reused for encrypted secret blobs (018-dynamic-agent-spawning)
+- Go 1.25+ (per go.mod) + `mark3labs/mcp-go` (MCP), `go-chi/chi` (HTTP), `spf13/cobra` (CLI), `modernc.org/sqlite` (storage), `jmoiron/sqlx` (query helpers), `cloudflare/tableflip` (graceful restart — NEW), `gopkg.in/yaml.v3` (config), `xeipuuv/gojsonschema` (config-schema validation) (019-plugin-system)
+- SQLite via `modernc.org/sqlite` (pure Go, zero CGO). New core table `plugin_migrations`. Plugin tables namespaced `plugin_<name>_*`. (019-plugin-system)
 
 ## Recent Changes
 - 002-mcp-auth-ux-polish: Added Go 1.23+ + ory/fosite (OAuth 2.1), mark3labs/mcp-go (MCP server), go-chi/chi (HTTP), Svelte 5 + Tailwind (Web UI)
