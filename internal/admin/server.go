@@ -34,20 +34,25 @@ type K8sServiceProvider interface {
 
 // Services holds references to all services the admin socket can control.
 type Services struct {
-	Users              *auth.SQLiteUserStore
-	Sessions           auth.SessionStore
-	Agents             *agents.AgentService
-	Messages           *messaging.MessagingService
-	Channels           *channels.Service
-	Traces             trace.TraceStore
-	EmbeddingStore     *search.EmbeddingStore
-	VectorIndex        *search.VectorIndex
-	SearchService      *search.Service
-	AttachmentService  *attachments.Service
-	WebhookService     WebhookServiceProvider
-	K8sService         K8sServiceProvider
-	DataDir            string
-	RetentionWorker    RetentionStatusProvider
+	Users             *auth.SQLiteUserStore
+	Sessions          auth.SessionStore
+	Agents            *agents.AgentService
+	Messages          *messaging.MessagingService
+	Channels          *channels.Service
+	Traces            trace.TraceStore
+	EmbeddingStore    *search.EmbeddingStore
+	VectorIndex       *search.VectorIndex
+	SearchService     *search.Service
+	AttachmentService *attachments.Service
+	WebhookService    WebhookServiceProvider
+	K8sService        K8sServiceProvider
+	DataDir           string
+	RetentionWorker   RetentionStatusProvider
+
+	// CoreMemoryStore is the per-(owner, agent) core memory store wired
+	// in for feature 020 admin CLI commands (`synapbus memory core ...`).
+	// May be nil — handlers report "core memory store not configured".
+	CoreMemoryStore *messaging.CoreMemoryStore
 }
 
 // RetentionStatusProvider provides retention status information.

@@ -26,6 +26,7 @@ import (
 	"github.com/synapbus/synapbus/internal/a2a"
 	"github.com/synapbus/synapbus/internal/actions"
 	"github.com/synapbus/synapbus/internal/admin"
+	"github.com/synapbus/synapbus/internal/agentquery"
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/api"
 	"github.com/synapbus/synapbus/internal/apikeys"
@@ -34,51 +35,50 @@ import (
 	"github.com/synapbus/synapbus/internal/auth/idp"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
+	"github.com/synapbus/synapbus/internal/dispatcher"
 	"github.com/synapbus/synapbus/internal/goals"
 	"github.com/synapbus/synapbus/internal/goaltasks"
-	"github.com/synapbus/synapbus/internal/secrets"
-	"github.com/synapbus/synapbus/internal/dispatcher"
-	"github.com/synapbus/synapbus/internal/health"
-	"github.com/synapbus/synapbus/internal/jsruntime"
-	k8spkg "github.com/synapbus/synapbus/internal/k8s"
-	"github.com/synapbus/synapbus/internal/marketplace"
-	mcpserver "github.com/synapbus/synapbus/internal/mcp"
-	"github.com/synapbus/synapbus/internal/agentquery"
-	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
-	"github.com/synapbus/synapbus/internal/messaging"
-	prommetrics "github.com/synapbus/synapbus/internal/metrics"
 	"github.com/synapbus/synapbus/internal/harness"
 	"github.com/synapbus/synapbus/internal/harness/docker"
 	"github.com/synapbus/synapbus/internal/harness/k8sjob"
 	"github.com/synapbus/synapbus/internal/harness/runs"
 	"github.com/synapbus/synapbus/internal/harness/subprocess"
 	"github.com/synapbus/synapbus/internal/harness/webhook"
+	"github.com/synapbus/synapbus/internal/health"
+	"github.com/synapbus/synapbus/internal/jsruntime"
+	k8spkg "github.com/synapbus/synapbus/internal/k8s"
+	"github.com/synapbus/synapbus/internal/marketplace"
+	mcpserver "github.com/synapbus/synapbus/internal/mcp"
+	"github.com/synapbus/synapbus/internal/messaging"
+	prommetrics "github.com/synapbus/synapbus/internal/metrics"
 	"github.com/synapbus/synapbus/internal/observability"
+	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/reactions"
+	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/search/embedding"
+	"github.com/synapbus/synapbus/internal/secrets"
 	"github.com/synapbus/synapbus/internal/storage"
-	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/web"
-	"github.com/synapbus/synapbus/internal/wiki"
 	"github.com/synapbus/synapbus/internal/webhooks"
+	"github.com/synapbus/synapbus/internal/wiki"
 )
 
 // version is set at build time via -ldflags "-X main.version=..."
 var version = "dev"
 
 var (
-	host              string
-	port              int
-	dataDir           string
-	logLevel          string
-	metricsEnabled    bool
-	traceRetention    string
-	adminSocketPath   string
-	webhookWorkers    int
-	messageRetention  string
+	host             string
+	port             int
+	dataDir          string
+	logLevel         string
+	metricsEnabled   bool
+	traceRetention   string
+	adminSocketPath  string
+	webhookWorkers   int
+	messageRetention string
 )
 
 func main() {
@@ -582,6 +582,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, wikiService, con, jsPool, actionRegistry, actionIndex, db.DB)
 
+	// Feature 020 — proactive memory injection.
+	//
+	// Parse the memory config from env, build the audit-ring store and
+	// the per-(owner, agent) core memory store, and wire both into the
+	// MCP hybrid tool surface. When SYNAPBUS_INJECTION_ENABLED=0 (the
+	// default), SetInjection still runs but WrapInjection returns each
+	// handler unchanged, so tool responses keep their pre-feature shape
+	// bit-for-bit (FR-012, SC-009).
+	memCfg := messaging.ParseMemoryConfig()
+	memoryInjectionStore := messaging.NewMemoryInjections(db.DB)
+	coreMemoryStore := messaging.NewCoreMemoryStore(db.DB, memCfg.CoreMemoryMaxBytes)
+	mcpSrv.SetInjection(memCfg, memoryInjectionStore, messaging.NewCoreProvider(coreMemoryStore))
+	slog.Info("proactive memory injection wired",
+		"enabled", memCfg.InjectionEnabled,
+		"budget_tokens", memCfg.InjectionBudgetTokens,
+		"core_max_bytes", memCfg.CoreMemoryMaxBytes,
+	)
+
 	// Wire the agent marketplace (spec 016 MVP).
 	marketplaceStore := marketplace.NewStore(db.DB)
 	marketplaceSvc := marketplace.NewService(marketplaceStore, wikiService, swarmService, channelService, msgService, tracer)
@@ -789,6 +807,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		GoalTasksService:  goalTasksService,
 		BaseURL:           baseURL,
 		WikiService:       wikiService,
+		CoreMemoryStore:   coreMemoryStore,
 	})
 	r.Mount("/", apiRouter)
 
@@ -797,13 +816,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start admin socket server
 	adminSvcs := &admin.Services{
-		Users:             userStore,
-		Sessions:          sessionStore,
-		Agents:            agentService,
-		Messages:          msgService,
-		Channels:          channelService,
-		Traces:            traceStore,
-		DataDir:           dataDir,
+		Users:    userStore,
+		Sessions: sessionStore,
+		Agents:   agentService,
+		Messages: msgService,
+		Channels: channelService,
+		Traces:   traceStore,
+		DataDir:  dataDir,
 	}
 	// Wire optional services into admin (may be nil if not configured)
 	if searchCfg.IsEnabled() {
@@ -819,6 +838,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	adminSvcs.WebhookService = webhookService
 	adminSvcs.K8sService = k8sService
+	adminSvcs.CoreMemoryStore = coreMemoryStore
 	adminServer := admin.NewServer(adminSocketPath, db.DB, adminSvcs, logger)
 	if err := adminServer.Start(); err != nil {
 		return fmt.Errorf("start admin socket: %w", err)

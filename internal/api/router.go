@@ -15,9 +15,9 @@ import (
 	"github.com/synapbus/synapbus/internal/harness/runs"
 	"github.com/synapbus/synapbus/internal/k8s"
 	"github.com/synapbus/synapbus/internal/messaging"
-	"github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/reactions"
+	"github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/webhooks"
@@ -54,6 +54,10 @@ type RouterConfig struct {
 	DB                *sql.DB
 	Version           string
 	BaseURL           string
+
+	// CoreMemoryStore (feature 020 — US2) wires the per-(owner, agent)
+	// core memory REST endpoints. Nil → routes not registered.
+	CoreMemoryStore *messaging.CoreMemoryStore
 }
 
 // NewRouter creates a chi router with all API routes configured.
@@ -330,6 +334,18 @@ func NewRouterWithConfig(cfg RouterConfig) chi.Router {
 			r.Get("/api/analytics/top-agents", analyticsHandler.TopAgents)
 			r.Get("/api/analytics/top-channels", analyticsHandler.TopChannels)
 			r.Get("/api/analytics/summary", analyticsHandler.Summary)
+		})
+	}
+
+	// Per-(owner, agent) core memory (feature 020 — US2)
+	if cfg.CoreMemoryStore != nil {
+		coreHandler := NewMemoryCoreHandler(cfg.CoreMemoryStore)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware)
+
+			r.Get("/api/owner/{ownerID}/agents/{agentName}/core-memory", coreHandler.Get)
+			r.Put("/api/owner/{ownerID}/agents/{agentName}/core-memory", coreHandler.Put)
+			r.Delete("/api/owner/{ownerID}/agents/{agentName}/core-memory", coreHandler.Delete)
 		})
 	}
 

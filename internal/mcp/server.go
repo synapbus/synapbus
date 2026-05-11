@@ -29,13 +29,13 @@ import (
 
 // MCPServer wraps the mcp-go server with SynapBus services.
 type MCPServer struct {
-	mcpServer        *server.MCPServer
-	httpServer       *server.StreamableHTTPServer
-	connMgr          *ConnectionManager
-	agentService     *agents.AgentService
-	hybridRegistrar  *HybridToolRegistrar
-	logger           *slog.Logger
-	console          *console.Printer
+	mcpServer       *server.MCPServer
+	httpServer      *server.StreamableHTTPServer
+	connMgr         *ConnectionManager
+	agentService    *agents.AgentService
+	hybridRegistrar *HybridToolRegistrar
+	logger          *slog.Logger
+	console         *console.Printer
 }
 
 // NewMCPServer creates and configures a new MCP server with 5 hybrid tools registered.
@@ -204,6 +204,25 @@ func NewMCPServer(
 
 	logger.Info("MCP server initialized (4 hybrid tools, 4 prompts, streamable HTTP transport)")
 	return s
+}
+
+// SetInjection wires the proactive-memory injection middleware
+// (feature 020) into the hybrid tool registrar and re-registers the
+// hybrid tools so the wrappers take effect. Must be called after
+// NewMCPServer and before the server starts handling traffic.
+//
+// `coreProvider` is consulted only on session-start tools (currently
+// `my_status`). Pass nil when US2 has not yet been wired.
+func (s *MCPServer) SetInjection(cfg messaging.MemoryConfig, store *messaging.MemoryInjections, coreProvider search.CoreMemoryProvider) {
+	if s.hybridRegistrar == nil || s.mcpServer == nil {
+		return
+	}
+	s.hybridRegistrar.SetInjection(cfg, store, coreProvider)
+	// Re-register the hybrid tools so the new InjectionEnabled / Core
+	// wiring takes effect. AddTool overwrites by name (see mcp-go's
+	// `MCPServer.AddTools`), so this swaps in the wrapped handlers
+	// without leaking the original registrations.
+	s.hybridRegistrar.RegisterAllOnServer(s.mcpServer)
 }
 
 // WireGoalsTools registers the spec-018 tool surface (create_goal,
