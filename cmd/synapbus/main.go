@@ -599,7 +599,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		db.DB,
 	)
 	mcpSrv.WireGoalsTools(goalsToolReg)
-	slog.Info("spec-018 MCP tools wired (create_goal, propose_task_tree, propose_agent, claim_task, request_resource, list_resources)")
+	slog.Info("spec-018 MCP tools wired (create_goal, propose_task_tree, claim_task, request_resource, list_resources, complete_goal)")
 
 	// Set up SQL query executor for agents (uses read pool if available)
 	queryDB := db.QueryDB()
@@ -645,12 +645,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		slog.Info("stalemate worker disabled by SYNAPBUS_DISABLE_STALEMATE_WORKER=1")
 	} else {
 		stalemateConfig := messaging.ParseStalemateConfig()
-		stalemateWorker = messaging.NewStalemateWorker(db.DB, msgService, &channelLookupAdapter{channelService: channelService}, stalemateConfig)
+		stalemateWorker = messaging.NewStalemateWorker(db.DB, msgService, stalemateConfig)
 		stalemateWorker.Start()
 		slog.Info("stalemate worker started",
 			"processing_timeout", stalemateConfig.ProcessingTimeout.String(),
-			"reminder_after", stalemateConfig.ReminderAfter.String(),
-			"escalate_after", stalemateConfig.EscalateAfter.String(),
 			"interval", stalemateConfig.Interval.String(),
 		)
 	}
@@ -1156,19 +1154,6 @@ func ensureDefaultMCPClient(ctx context.Context, db *sql.DB, bcryptCost int) {
 		"redirect_uris", "http://localhost:*",
 		"scopes", "mcp",
 	)
-}
-
-// channelLookupAdapter adapts channels.Service to messaging.ChannelLookup.
-type channelLookupAdapter struct {
-	channelService *channels.Service
-}
-
-func (a *channelLookupAdapter) GetChannelIDByName(ctx context.Context, name string) (int64, error) {
-	ch, err := a.channelService.GetChannelByName(ctx, name)
-	if err != nil {
-		return 0, err
-	}
-	return ch.ID, nil
 }
 
 // trustAdjusterAdapter adapts trust.Service to reactions.TrustAdjuster.

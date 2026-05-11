@@ -207,8 +207,9 @@ func NewMCPServer(
 }
 
 // WireGoalsTools registers the spec-018 tool surface (create_goal,
-// propose_task_tree, propose_agent, claim_task, request_resource,
-// list_resources) on the MCP server. Must be called after NewMCPServer.
+// propose_task_tree, claim_task, request_resource, list_resources,
+// complete_goal) on the MCP server. Must be called after NewMCPServer.
+// Note: propose_agent was removed in the internal-only mode change.
 func (s *MCPServer) WireGoalsTools(r *GoalsToolRegistrar) {
 	if r == nil || s.mcpServer == nil {
 		return
