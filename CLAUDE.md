@@ -114,6 +114,8 @@ make lint           # Run linters
 - SQLite via `modernc.org/sqlite` — five new migrations (`021_goals_tasks.sql`, `022_agent_proposals.sql`, `023_agent_trust_model.sql`, `024_secrets.sql`, `025_harness_runs_task_id.sql`); existing content-addressable attachment store reused for encrypted secret blobs (018-dynamic-agent-spawning)
 - Go 1.25+ (per go.mod) + `mark3labs/mcp-go` (MCP), `go-chi/chi` (HTTP), `spf13/cobra` (CLI), `modernc.org/sqlite` (storage), `jmoiron/sqlx` (query helpers), `cloudflare/tableflip` (graceful restart — NEW), `gopkg.in/yaml.v3` (config), `xeipuuv/gojsonschema` (config-schema validation) (019-plugin-system)
 - SQLite via `modernc.org/sqlite` (pure Go, zero CGO). New core table `plugin_migrations`. Plugin tables namespaced `plugin_<name>_*`. (019-plugin-system)
+- Go 1.25+ (per `go.mod`) + `mark3labs/mcp-go` (MCP tools), `go-chi/chi` (HTTP), `modernc.org/sqlite` (storage), `TFMV/hnsw` (vectors via existing `search.Service`), existing `internal/harness` package (dispatch seam). **No new external dependencies.** (020-proactive-memory-dream-worker)
+- SQLite via `modernc.org/sqlite` — one new migration `028_memory_consolidation.sql`. Memory pool reuses the existing `messages` table on memory-flagged channels. (020-proactive-memory-dream-worker)
 
 ## Recent Changes
 - 002-mcp-auth-ux-polish: Added Go 1.23+ + ory/fosite (OAuth 2.1), mark3labs/mcp-go (MCP server), go-chi/chi (HTTP), Svelte 5 + Tailwind (Web UI)
