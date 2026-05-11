@@ -225,6 +225,22 @@ func (s *MCPServer) SetInjection(cfg messaging.MemoryConfig, store *messaging.Me
 	s.hybridRegistrar.RegisterAllOnServer(s.mcpServer)
 }
 
+// SetDream wires the six memory_* MCP tools (feature 020 — US3).
+// Only registers when cfg.DreamEnabled is true; otherwise this is a
+// no-op so the tool surface remains identical to the pre-feature
+// shape. Must be called before the server starts serving traffic.
+func (s *MCPServer) SetDream(deps MemoryToolDeps) {
+	if s == nil || s.mcpServer == nil {
+		return
+	}
+	if !deps.MemConfig.DreamEnabled {
+		s.logger.Info("dream tools not registered (SYNAPBUS_DREAM_ENABLED=0)")
+		return
+	}
+	reg := NewMemoryToolRegistrar(deps)
+	reg.RegisterAllOnServer(s.mcpServer)
+}
+
 // WireGoalsTools registers the spec-018 tool surface (create_goal,
 // propose_task_tree, claim_task, request_resource, list_resources,
 // complete_goal) on the MCP server. Must be called after NewMCPServer.

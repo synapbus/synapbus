@@ -233,6 +233,8 @@ func (s *AdminServer) dispatch(req Request) Response {
 		return s.handleMemoryCoreSet(ctx, req.Args)
 	case "memory.core.delete":
 		return s.handleMemoryCoreDelete(ctx, req.Args)
+	case "memory.dream_run":
+		return s.handleMemoryDreamRun(ctx, req.Args)
 
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Command)}
@@ -1982,6 +1984,38 @@ func (s *AdminServer) handleMemoryCoreDelete(ctx context.Context, args json.RawM
 		"owner_id":   ownerStr,
 		"agent_name": p.Agent,
 		"deleted":    true,
+	}}
+}
+
+// handleMemoryDreamRun forces a single dream-job dispatch. Bypasses
+// trigger checks — useful for kubic verification (quickstart §"verify
+// dream agent"). Returns the created job_id.
+func (s *AdminServer) handleMemoryDreamRun(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Owner   string `json:"owner"`
+		JobType string `json:"job_type"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.JobType == "" {
+		return Response{OK: false, Error: "job_type is required"}
+	}
+	if s.services.DreamRun == nil {
+		return Response{OK: false, Error: "dream worker not configured (SYNAPBUS_DREAM_ENABLED=0?)"}
+	}
+	ownerStr, err := s.resolveOwnerString(ctx, p.Owner)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	jobID, err := s.services.DreamRun(ctx, ownerStr, p.JobType)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	return Response{OK: true, Data: map[string]any{
+		"job_id":   jobID,
+		"owner_id": ownerStr,
+		"job_type": p.JobType,
 	}}
 }
 

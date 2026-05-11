@@ -53,6 +53,12 @@ type Services struct {
 	// in for feature 020 admin CLI commands (`synapbus memory core ...`).
 	// May be nil — handlers report "core memory store not configured".
 	CoreMemoryStore *messaging.CoreMemoryStore
+
+	// DreamRun, when non-nil, dispatches a single consolidation job
+	// bypassing the trigger check. Wired by main.go when the
+	// consolidator worker is enabled. Closure form keeps the worker
+	// internals out of the admin package's import graph.
+	DreamRun func(ctx context.Context, ownerID, jobType string) (jobID int64, err error)
 }
 
 // RetentionStatusProvider provides retention status information.

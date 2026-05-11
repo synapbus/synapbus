@@ -47,6 +47,35 @@ type CoreMemoryProvider interface {
 	Get(ctx context.Context, ownerID, agentName string) (string, error)
 }
 
+// PinProvider returns the owner's pinned message ids. Set on
+// InjectionOpts via US3 wiring; when nil the overlay is skipped.
+type PinProvider interface {
+	ListForOwner(ctx context.Context, ownerID string) ([]int64, error)
+}
+
+// StatusProvider returns the memory_status of each id in the input
+// slice. Ids that do not appear in the returned map are implicitly
+// `active`. Set on InjectionOpts via US3 wiring.
+type StatusProvider interface {
+	Statuses(ctx context.Context, msgIDs []int64) (map[int64]MemoryStatusInfo, error)
+}
+
+// MemoryStatusInfo mirrors messaging.MemoryStatus without importing
+// the messaging package (avoids a cycle). The injection retrieval
+// layer needs only the Status string and the active/non-active bit.
+type MemoryStatusInfo struct {
+	Status string
+}
+
+// MessageLookup resolves message ids → MemoryItem fields for the pin
+// overlay. The overlay needs body / from_agent / channel for pinned
+// messages that did NOT come back from the search; loading them
+// directly from the messages table keeps this independent of the
+// search index.
+type MessageLookup interface {
+	LookupForInjection(ctx context.Context, ids []int64) ([]MemoryItem, error)
+}
+
 // InjectionOpts captures the per-call configuration for
 // BuildContextPacket. Sourced from messaging.MemoryConfig at wrap time.
 type InjectionOpts struct {
@@ -63,6 +92,19 @@ type InjectionOpts struct {
 	// CoreProvider is consulted when IncludeCore is true. May be nil
 	// (US2 not yet wired) — then no core memory is included.
 	CoreProvider CoreMemoryProvider
+	// PinProvider, when non-nil, supplies owner-pinned message ids
+	// that are spliced into the packet with Score=1.0 regardless of
+	// the score floor. Status filter still drops soft_deleted /
+	// superseded pins so retrieval never surfaces tombstoned facts.
+	PinProvider PinProvider
+	// StatusProvider, when non-nil, supplies the memory_status of
+	// each candidate; results with status soft_deleted/superseded are
+	// dropped (unless pinned).
+	StatusProvider StatusProvider
+	// MessageLookup, when non-nil, resolves pinned message ids that
+	// did not surface through retrieval. When nil, only pins already
+	// present in the retrieval results are highlighted.
+	MessageLookup MessageLookup
 	// Now is overridable for tests. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -150,6 +192,20 @@ func BuildContextPacket(
 		}
 	}
 
+	// Apply memory_status filter (US3 T031): drop soft_deleted /
+	// superseded results unless they will be pinned in the next step.
+	memories = applyStatusFilter(ctx, memories, nil, opts)
+
+	// Pin overlay (US3 T029/T031): owner-pinned message ids bypass the
+	// score floor and are spliced in with Score=1.0 / Pinned=true. We
+	// build the pin set up-front so the status filter knows to spare
+	// them.
+	pinIDs, _ := loadPinIDs(ctx, opts, callerOwner)
+	if len(pinIDs) > 0 {
+		memories = applyStatusFilter(ctx, memories, pinIDs, opts)
+		memories = applyPinOverlay(ctx, memories, pinIDs, opts)
+	}
+
 	// Apply token budget: greedy fill in descending score (results are
 	// already sorted). Truncate the last admitted item to fit when it
 	// would otherwise overflow.
@@ -172,9 +228,6 @@ func BuildContextPacket(
 		// Empty + no core → caller should omit the relevant_context field.
 		return nil, nil
 	}
-
-	// TODO(US3-T029): pin overlay — when ListPins lands, mark and
-	// always-include pinned memories regardless of the score floor.
 
 	if memories == nil {
 		memories = []MemoryItem{}
@@ -312,6 +365,112 @@ func packetChars(p *ContextPacket) int {
 	}
 	total += len(p.CoreMemory)
 	return total
+}
+
+// loadPinIDs queries the configured PinProvider, if any, and returns
+// the owner's pinned message ids. Returns nil on any error so that pin
+// retrieval failure never breaks the wider injection path.
+func loadPinIDs(ctx context.Context, opts InjectionOpts, ownerID string) ([]int64, error) {
+	if opts.PinProvider == nil || ownerID == "" {
+		return nil, nil
+	}
+	ids, err := opts.PinProvider.ListForOwner(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// applyStatusFilter drops items whose memory_status is soft_deleted or
+// superseded. `sparedIDs` is the set of message ids that bypass the
+// filter (pinned ids). When opts.StatusProvider is nil this is a no-op.
+func applyStatusFilter(ctx context.Context, items []MemoryItem, sparedIDs []int64, opts InjectionOpts) []MemoryItem {
+	if opts.StatusProvider == nil || len(items) == 0 {
+		return items
+	}
+	ids := make([]int64, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	statuses, err := opts.StatusProvider.Statuses(ctx, ids)
+	if err != nil {
+		return items
+	}
+	spared := map[int64]struct{}{}
+	for _, id := range sparedIDs {
+		spared[id] = struct{}{}
+	}
+	out := make([]MemoryItem, 0, len(items))
+	for _, it := range items {
+		st, ok := statuses[it.ID]
+		if !ok || st.Status == "" || st.Status == "active" {
+			out = append(out, it)
+			continue
+		}
+		if _, isPinned := spared[it.ID]; isPinned {
+			out = append(out, it)
+			continue
+		}
+		// Drop soft_deleted / superseded non-pinned.
+	}
+	return out
+}
+
+// applyPinOverlay marks any item already present and whose id is pinned
+// as Pinned=true / Score=1.0; pinned ids that are NOT in the input set
+// are fetched via MessageLookup (if configured) and prepended.
+func applyPinOverlay(ctx context.Context, items []MemoryItem, pinIDs []int64, opts InjectionOpts) []MemoryItem {
+	if len(pinIDs) == 0 {
+		return items
+	}
+	pinSet := map[int64]struct{}{}
+	for _, id := range pinIDs {
+		pinSet[id] = struct{}{}
+	}
+	// Mark items already present.
+	present := map[int64]struct{}{}
+	for i := range items {
+		if _, ok := pinSet[items[i].ID]; ok {
+			items[i].Pinned = true
+			items[i].Score = 1.0
+		}
+		present[items[i].ID] = struct{}{}
+	}
+	// Fetch missing pinned ids via MessageLookup (if any).
+	var missing []int64
+	for id := range pinSet {
+		if _, ok := present[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 && opts.MessageLookup != nil {
+		extra, err := opts.MessageLookup.LookupForInjection(ctx, missing)
+		if err == nil {
+			// Status filter on the freshly-loaded pinned messages: if
+			// the provider says they are soft_deleted / superseded, do
+			// not surface them either, even though pinned.
+			if opts.StatusProvider != nil {
+				statuses, _ := opts.StatusProvider.Statuses(ctx, missing)
+				filtered := extra[:0]
+				for _, m := range extra {
+					if st, ok := statuses[m.ID]; ok && st.Status != "" && st.Status != "active" {
+						continue
+					}
+					filtered = append(filtered, m)
+				}
+				extra = filtered
+			}
+			// Prepend in stable id order (newest first by convention —
+			// pins are sorted DESC by pinned_at in the store).
+			for i := range extra {
+				extra[i].Pinned = true
+				extra[i].Score = 1.0
+				extra[i].MatchType = "pinned"
+			}
+			items = append(extra, items...)
+		}
+	}
+	return items
 }
 
 // channelName resolves a channel ID to a name for the optional

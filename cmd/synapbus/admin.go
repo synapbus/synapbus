@@ -1439,6 +1439,31 @@ Examples:
 	memoryCoreCmd.AddCommand(memoryCoreGetCmd, memoryCoreSetCmd, memoryCoreDeleteCmd)
 	memoryCmd.AddCommand(memoryCoreCmd)
 
+	// ----- memory dream-run (feature 020 — manual dispatch) -----
+	var (
+		dreamRunOwner   string
+		dreamRunJobType string
+	)
+	memoryDreamRunCmd := &cobra.Command{
+		Use:   "dream-run",
+		Short: "Force a single consolidation job dispatch (bypasses trigger checks)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("memory.dream_run", map[string]string{
+				"owner":    dreamRunOwner,
+				"job_type": dreamRunJobType,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	memoryDreamRunCmd.Flags().StringVar(&dreamRunOwner, "owner", "", "Owner username or numeric user ID")
+	memoryDreamRunCmd.Flags().StringVar(&dreamRunJobType, "job", "reflection", "Job type (reflection | core_rewrite | dedup_contradiction | link_gen)")
+	_ = memoryDreamRunCmd.MarkFlagRequired("owner")
+	memoryCmd.AddCommand(memoryDreamRunCmd)
+
 	// ----- add persistent flag and commands to root -----
 	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "/tmp/synapbus.sock", "Path to admin Unix socket")
 

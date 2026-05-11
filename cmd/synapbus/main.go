@@ -600,6 +600,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"core_max_bytes", memCfg.CoreMemoryMaxBytes,
 	)
 
+	// Feature 020 — dream worker (US3) stores. These are always
+	// constructed so admin CLI / future REST endpoints can read them
+	// even when SYNAPBUS_DREAM_ENABLED=0. The worker itself starts
+	// only when the flag is on.
+	memoryLinkStore := messaging.NewLinkStore(db.DB)
+	memoryPinStore := messaging.NewPinStore(db.DB)
+	memoryJobsStore := messaging.NewJobsStore(db.DB)
+	dispatchTokens := messaging.NewDispatchTokenStore(db.DB)
+
+	// Wire the auto-link emitter as a message listener (T035).
+	msgService.AddMessageListener(messaging.NewAutoLinkListener(db.DB, memoryLinkStore))
+
+	// Register the six memory_* MCP tools when SYNAPBUS_DREAM_ENABLED=1.
+	mcpSrv.SetDream(mcpserver.MemoryToolDeps{
+		DB:        db.DB,
+		Msg:       msgService,
+		Agents:    agentService,
+		Core:      coreMemoryStore,
+		Links:     memoryLinkStore,
+		Pins:      memoryPinStore,
+		Jobs:      memoryJobsStore,
+		Tokens:    dispatchTokens,
+		MemConfig: memCfg,
+	})
+
 	// Wire the agent marketplace (spec 016 MVP).
 	marketplaceStore := marketplace.NewStore(db.DB)
 	marketplaceSvc := marketplace.NewService(marketplaceStore, wikiService, swarmService, channelService, msgService, tracer)
@@ -664,11 +689,35 @@ func runServe(cmd *cobra.Command, args []string) error {
 	} else {
 		stalemateConfig := messaging.ParseStalemateConfig()
 		stalemateWorker = messaging.NewStalemateWorker(db.DB, msgService, stalemateConfig)
+		stalemateWorker.SetMemoryInjections(memoryInjectionStore)
 		stalemateWorker.Start()
 		slog.Info("stalemate worker started",
 			"processing_timeout", stalemateConfig.ProcessingTimeout.String(),
 			"interval", stalemateConfig.Interval.String(),
 		)
+	}
+
+	// Feature 020 — consolidator (dream) worker. Only starts when
+	// SYNAPBUS_DREAM_ENABLED=1.
+	var consolidator *messaging.ConsolidatorWorker
+	if memCfg.DreamEnabled {
+		consolidator = messaging.NewConsolidatorWorker(
+			db.DB,
+			memoryJobsStore,
+			dispatchTokens,
+			&harnessDispatcherAdapter{reg: harnessRegistry},
+			&agentLookupAdapter{svc: agentService},
+			memCfg,
+		)
+		consolidator.Start()
+		slog.Info("consolidator (dream) worker started",
+			"interval", memCfg.DreamInterval.String(),
+			"watermark", memCfg.DreamWatermark,
+			"max_concurrent", memCfg.DreamMaxConcurrent,
+			"agent", memCfg.DreamAgent,
+		)
+	} else {
+		slog.Info("consolidator (dream) worker disabled (SYNAPBUS_DREAM_ENABLED=0)")
 	}
 
 	// Create health checker
@@ -839,6 +888,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	adminSvcs.WebhookService = webhookService
 	adminSvcs.K8sService = k8sService
 	adminSvcs.CoreMemoryStore = coreMemoryStore
+	if consolidator != nil {
+		// Closure form keeps admin's import graph independent of
+		// messaging.ConsolidatorWorker's full surface.
+		c := consolidator
+		adminSvcs.DreamRun = func(ctx context.Context, ownerID, jobType string) (int64, error) {
+			return c.ForceRun(ctx, ownerID, jobType)
+		}
+	}
 	adminServer := admin.NewServer(adminSocketPath, db.DB, adminSvcs, logger)
 	if err := adminServer.Start(); err != nil {
 		return fmt.Errorf("start admin socket: %w", err)
@@ -902,6 +959,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Stop stalemate worker
 	if stalemateWorker != nil {
 		stalemateWorker.Stop()
+	}
+
+	// Stop consolidator (dream) worker
+	if consolidator != nil {
+		consolidator.Stop()
 	}
 
 	// Stop embedding pipeline
@@ -1215,4 +1277,77 @@ func (a *messageAuthorResolverAdapter) GetMessageAuthor(ctx context.Context, mes
 		return "", err
 	}
 	return msg.FromAgent, nil
+}
+
+// agentLookupAdapter adapts agents.AgentService to
+// messaging.AgentLookup so the dream worker can resolve the dream-agent
+// record without dragging the full *agents.AgentService into the
+// messaging package. The returned messaging.DreamAgent is the raw
+// *agents.Agent itself — DreamAgent's only required method
+// (AgentName()) is satisfied by agents.Agent.Name via the
+// agentNameMethod helper below.
+type agentLookupAdapter struct {
+	svc *agents.AgentService
+}
+
+func (a *agentLookupAdapter) GetAgent(ctx context.Context, name string) (messaging.DreamAgent, error) {
+	ag, err := a.svc.GetAgent(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return agentDreamWrap{ag: ag}, nil
+}
+
+// agentDreamWrap adapts *agents.Agent to messaging.DreamAgent.
+type agentDreamWrap struct{ ag *agents.Agent }
+
+func (w agentDreamWrap) AgentName() string {
+	if w.ag == nil {
+		return ""
+	}
+	return w.ag.Name
+}
+
+// harnessDispatcherAdapter adapts *harness.Registry to
+// messaging.HarnessDispatcher so the consolidator worker can dispatch
+// dream-agent runs without importing the harness package (which would
+// create an import cycle — harness already imports messaging).
+type harnessDispatcherAdapter struct {
+	reg *harness.Registry
+}
+
+func (a *harnessDispatcherAdapter) Execute(
+	ctx context.Context,
+	agent messaging.DreamAgent,
+	req *messaging.HarnessExecRequest,
+) (*messaging.HarnessExecResult, error) {
+	// Unbox the agent record. The worker stores a DreamAgent
+	// interface; in production it's an agentDreamWrap holding the
+	// real *agents.Agent. Tests / admin force-runs may pass a bare
+	// DreamAgentNamed which has no underlying record — the harness
+	// fallback chain then resolves the backend by name alone.
+	var realAgent *agents.Agent
+	if wrap, ok := agent.(agentDreamWrap); ok {
+		realAgent = wrap.ag
+	}
+	hreq := &harness.ExecRequest{
+		RunID:     req.RunID,
+		AgentName: req.AgentName,
+		Agent:     realAgent,
+		Env:       req.Env,
+		Budget:    harness.Budget{MaxWallClock: req.MaxWallClock},
+	}
+	if req.Body != "" {
+		hreq.Message = &messaging.Message{Body: req.Body}
+	}
+	res, err := a.reg.Execute(ctx, realAgent, hreq)
+	if err != nil {
+		return nil, err
+	}
+	out := &messaging.HarnessExecResult{}
+	if res != nil {
+		out.ExitCode = res.ExitCode
+		out.Logs = res.Logs
+	}
+	return out, nil
 }
