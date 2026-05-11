@@ -165,30 +165,43 @@ func BuildContextPacket(
 	searchMode := ModeAuto
 
 	var memories []MemoryItem
-	if svc != nil && callerOwner != "" && query != "" {
-		// Drive retrieval through the existing hybrid path so we inherit
-		// access control + ranking. We still need a stricter owner filter
-		// on top of canAgentAccessMessage because the memory pool
-		// (open-brain) is broadly readable across agents within the same
-		// system, and we must enforce owner isolation (SC-008).
-		resp, err := svc.Search(ctx, agent.Name, SearchOptions{
-			Query:         query,
-			Mode:          ModeAuto,
-			Limit:         wantedLimit,
-			MinSimilarity: opts.MinScore,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("build context packet: search: %w", err)
-		}
-		if resp != nil {
-			searchMode = resp.SearchMode
-		}
-		if resp != nil && len(resp.Results) > 0 {
-			items, err := filterAndScore(ctx, svc, resp.Results, callerOwner, opts)
+	if svc != nil && callerOwner != "" {
+		if query != "" {
+			// Drive retrieval through the existing hybrid path so we inherit
+			// access control + ranking. We still need a stricter owner filter
+			// on top of canAgentAccessMessage because the memory pool
+			// (open-brain) is broadly readable across agents within the same
+			// system, and we must enforce owner isolation (SC-008).
+			resp, err := svc.Search(ctx, agent.Name, SearchOptions{
+				Query:         query,
+				Mode:          ModeAuto,
+				Limit:         wantedLimit,
+				MinSimilarity: opts.MinScore,
+			})
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("build context packet: search: %w", err)
+			}
+			if resp != nil {
+				searchMode = resp.SearchMode
+			}
+			if resp != nil && len(resp.Results) > 0 {
+				items, err := filterAndScore(ctx, svc, resp.Results, callerOwner, opts)
+				if err != nil {
+					return nil, err
+				}
+				memories = items
+			}
+		} else {
+			// FR-009 recency fallback: no explicit query → return the N
+			// most recent memory-channel messages whose author belongs to
+			// the caller's owner. Bypasses the hybrid index (which has no
+			// notion of "no query") and goes directly to SQL.
+			items, err := recentMemoriesForOwner(ctx, svc.db, callerOwner, wantedLimit)
+			if err != nil {
+				return nil, fmt.Errorf("build context packet: recency: %w", err)
 			}
 			memories = items
+			searchMode = "recent"
 		}
 	}
 
@@ -471,6 +484,47 @@ func applyPinOverlay(ctx context.Context, items []MemoryItem, pinIDs []int64, op
 		}
 	}
 	return items
+}
+
+// recentMemoriesForOwner returns the N most recent messages on memory
+// channels (open-brain, reflections-*, or any channel flagged
+// is_memory=true) whose author is owned by `ownerID`. Used when the
+// injection layer has no explicit retrieval query (e.g. my_status).
+//
+// Recency is approximated as "ORDER BY messages.id DESC" — id is
+// monotonically increasing per SQLite INSERT and matches created_at
+// ordering on this schema.
+func recentMemoriesForOwner(ctx context.Context, db *sql.DB, ownerID string, limit int) ([]MemoryItem, error) {
+	if db == nil || ownerID == "" || limit <= 0 {
+		return nil, nil
+	}
+	const q = `
+		SELECT m.id, m.from_agent, COALESCE(c.name,''), m.body, m.created_at
+		FROM messages m
+		JOIN agents a ON a.name = m.from_agent
+		LEFT JOIN channels c ON c.id = m.channel_id
+		WHERE CAST(a.owner_id AS TEXT) = ?
+		  AND m.channel_id IS NOT NULL
+		  AND c.name IN ('open-brain')
+		  AND m.body IS NOT NULL AND m.body != ''
+		ORDER BY m.id DESC
+		LIMIT ?`
+	rows, err := db.QueryContext(ctx, q, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MemoryItem
+	for rows.Next() {
+		var it MemoryItem
+		if err := rows.Scan(&it.ID, &it.FromAgent, &it.Channel, &it.Body, &it.CreatedAt); err != nil {
+			return nil, err
+		}
+		it.Score = 1.0
+		it.MatchType = "recent"
+		out = append(out, it)
+	}
+	return out, rows.Err()
 }
 
 // channelName resolves a channel ID to a name for the optional

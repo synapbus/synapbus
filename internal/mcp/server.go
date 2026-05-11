@@ -180,8 +180,13 @@ func NewMCPServer(
 	// Create Streamable HTTP transport with context func for auth propagation
 	httpServer := server.NewStreamableHTTPServer(mcpSrv,
 		server.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			// Propagate agent identity from HTTP auth to MCP context
+			// Propagate agent identity from HTTP auth to MCP context.
+			// The full *agents.Agent is needed by injection middleware
+			// (which uses owner_id to scope retrieval); the bare name is
+			// kept for backward-compat with existing handlers that call
+			// AgentNameFromContext directly.
 			if agent, ok := agents.AgentFromContext(r.Context()); ok {
+				ctx = agents.ContextWithAgent(ctx, agent)
 				ctx = ContextWithAgentName(ctx, agent.Name)
 				// Propagate owner ID for trace recording
 				if ownerID, ok := trace.OwnerIDFromContext(r.Context()); ok {
