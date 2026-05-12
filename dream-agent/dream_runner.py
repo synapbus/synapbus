@@ -262,6 +262,18 @@ async def run_session(env: dict[str, str], model: str, max_turns: int, config_di
                 usage = getattr(message, "usage", None)
                 tokens_in = getattr(usage, "input_tokens", 0) if usage else 0
                 tokens_out = getattr(usage, "output_tokens", 0) if usage else 0
+                # Max20 OAuth sessions don't surface tokens through the
+                # SDK's ResultMessage.usage. Fall back to a turn-based
+                # estimate so the server-side UsageGate has *some* signal.
+                # Numbers calibrated from observed reflection runs:
+                # ~5K input + ~300 output per turn, plus ~2K per tool call
+                # (memory_list_unprocessed payloads dominate).
+                if tokens_in == 0:
+                    num_turns = int(getattr(message, "num_turns", 0) or 0)
+                    tokens_in = max(0, num_turns * 5000 + tool_calls * 2000)
+                if tokens_out == 0:
+                    num_turns = int(getattr(message, "num_turns", 0) or 0)
+                    tokens_out = max(0, num_turns * 300)
                 is_error = getattr(message, "is_error", False)
                 duration_s = round(time.time() - started, 1)
                 logger.info({

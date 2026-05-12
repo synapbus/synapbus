@@ -167,6 +167,22 @@ func (h *Harness) Execute(ctx context.Context, req *harness.ExecRequest) (*harne
 	// agents emitting a final result envelope). If it parses, stash it.
 	if rj := extractResultJSON(logs); rj != nil {
 		res.ResultJSON = rj
+		// Best-effort: pull token-usage fields when the agent emitted
+		// them on the final line (claude-agent-sdk / dream-runner do).
+		// Feeds into the dream worker's UsageGate circuit breaker so
+		// consumption actually counts.
+		var u struct {
+			TokensIn     int64   `json:"tokens_in"`
+			TokensOut    int64   `json:"tokens_out"`
+			TokensCached int64   `json:"tokens_cached"`
+			CostUSD      float64 `json:"cost_usd"`
+		}
+		if err := json.Unmarshal(rj, &u); err == nil {
+			res.Usage.TokensIn = u.TokensIn
+			res.Usage.TokensOut = u.TokensOut
+			res.Usage.TokensCached = u.TokensCached
+			res.Usage.CostUSD = u.CostUSD
+		}
 	}
 	return res, nil
 }
