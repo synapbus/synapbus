@@ -359,12 +359,29 @@ func (w *ConsolidatorWorker) unprocessedCount(ctx context.Context, ownerID strin
 // ForceRun bypasses watermark/cron triggers and dispatches one job
 // for (ownerID, jobType) immediately. Used by the admin CLI
 // `synapbus memory dream-run` command. Returns the created job_id (or
-// the existing in-flight one).
+// the existing in-flight one). Uses slot 0 — for fan-out, see ForceRunN.
 //
 // The circuit breaker still applies — admins who want to override
 // must clear today's usage row directly. Manual override on top of a
 // blown budget defeats the safety net.
 func (w *ConsolidatorWorker) ForceRun(ctx context.Context, ownerID, jobType string) (int64, error) {
+	ids, err := w.ForceRunN(ctx, ownerID, jobType, 1)
+	if err != nil || len(ids) == 0 {
+		return 0, err
+	}
+	return ids[0], nil
+}
+
+// ForceRunN dispatches up to N parallel jobs of the same type for one
+// owner. core_rewrite ignores N and dispatches at most one (per-agent
+// blob is wholesale-replace; concurrent rewrites would race).
+func (w *ConsolidatorWorker) ForceRunN(ctx context.Context, ownerID, jobType string, parallel int) ([]int64, error) {
+	if parallel <= 0 {
+		parallel = 1
+	}
+	if jobType == JobTypeCoreRewrite {
+		parallel = 1
+	}
 	if w.gate != nil {
 		allowed, reason, _ := w.gate.Allow(ctx, ownerID)
 		if !allowed {
@@ -376,37 +393,58 @@ func (w *ConsolidatorWorker) ForceRun(ctx context.Context, ownerID, jobType stri
 				}
 				recordCircuitBrokenMetric(ownerID, jobType, reason)
 				recordJobMetric(ownerID, jobType, JobStatusCircuitBroken)
-				return jobID, fmt.Errorf("circuit broken: %s", reason)
+				return []int64{jobID}, fmt.Errorf("circuit broken: %s", reason)
 			}
-			return 0, fmt.Errorf("circuit broken: %s", reason)
+			return nil, fmt.Errorf("circuit broken: %s", reason)
 		}
 	}
-	jobID, err := w.jobs.Create(ctx, ownerID, jobType, "manual:"+ownerID)
-	if err != nil {
-		if errors.Is(err, ErrJobAlreadyInFlight) {
-			if active, _ := w.jobs.ActiveJob(ctx, ownerID, jobType); active != nil {
-				return active.ID, nil
+	out := make([]int64, 0, parallel)
+	for slot := 0; slot < parallel; slot++ {
+		jobID, err := w.jobs.CreateOnSlot(ctx, ownerID, jobType, "manual:"+ownerID, slot)
+		if err != nil {
+			if errors.Is(err, ErrJobAlreadyInFlight) {
+				// Slot already busy. If this is the first slot, fall back
+				// to returning the existing in-flight job (preserves
+				// historical ForceRun semantics).
+				if len(out) == 0 && slot == 0 {
+					if active, _ := w.jobs.ActiveJob(ctx, ownerID, jobType); active != nil {
+						return []int64{active.ID}, nil
+					}
+				}
+				w.logger.Debug("slot busy; skipping", "owner_id", ownerID, "job_type", jobType, "slot", slot)
+				continue
 			}
+			return out, err
 		}
-		return 0, err
+		if err := w.launchOne(ctx, ownerID, jobType, jobID); err != nil {
+			return out, err
+		}
+		out = append(out, jobID)
 	}
+	return out, nil
+}
+
+// launchOne wires up the per-job tokens / harness dispatch for an
+// already-Created job row. Shared by ForceRunN and the worker's
+// internal tryDispatch path.
+func (w *ConsolidatorWorker) launchOne(ctx context.Context, ownerID, jobType string, jobID int64) error {
 	if w.usage != nil {
 		_ = w.usage.RecordStart(ctx, ownerID)
 	}
 	tok, _, err := w.tokens.Issue(ctx, ownerID, jobID)
 	if err != nil {
 		_ = w.jobs.Complete(ctx, jobID, JobStatusFailed, "", "token issue: "+err.Error())
-		return 0, fmt.Errorf("issue token: %w", err)
+		return fmt.Errorf("issue token: %w", err)
 	}
 	agent, err := w.agentLook.GetAgent(ctx, w.cfg.DreamAgent)
 	if err != nil || agent == nil {
 		_ = w.jobs.Complete(ctx, jobID, JobStatusFailed, "", "dream agent not found")
-		return 0, fmt.Errorf("dream agent %q not found: %w", w.cfg.DreamAgent, err)
+		return fmt.Errorf("dream agent %q not found: %w", w.cfg.DreamAgent, err)
 	}
 	runID := uuid.NewString()
 	if err := w.jobs.Dispatch(ctx, jobID, runID, tok); err != nil {
 		_ = w.jobs.Complete(ctx, jobID, JobStatusFailed, "", "dispatch flip: "+err.Error())
-		return 0, fmt.Errorf("dispatch flip: %w", err)
+		return fmt.Errorf("dispatch flip: %w", err)
 	}
 	w.wg.Add(1)
 	go func() {
@@ -419,7 +457,7 @@ func (w *ConsolidatorWorker) ForceRun(ctx context.Context, ownerID, jobType stri
 		}
 		w.runJob(ownerID, jobID, jobType, tok, runID, agent)
 	}()
-	return jobID, nil
+	return nil
 }
 
 // tryDispatch attempts to create+dispatch one job. Idempotent —

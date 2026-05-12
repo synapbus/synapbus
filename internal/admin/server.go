@@ -59,6 +59,15 @@ type Services struct {
 	// consolidator worker is enabled. Closure form keeps the worker
 	// internals out of the admin package's import graph.
 	DreamRun func(ctx context.Context, ownerID, jobType string) (jobID int64, err error)
+
+	// DreamRunN fans out N parallel consolidation jobs (via slot 0..N-1)
+	// for one (owner, job_type). Used by `synapbus memory dream-run
+	// --parallel N`. core_rewrite always coerces to N=1 server-side.
+	DreamRunN func(ctx context.Context, ownerID, jobType string, parallel int) (jobIDs []int64, err error)
+
+	// DefaultDreamParallel is consulted when the CLI request omits
+	// --parallel. Sourced from MemoryConfig.DreamParallel.
+	DefaultDreamParallel int
 }
 
 // RetentionStatusProvider provides retention status information.

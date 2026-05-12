@@ -284,6 +284,14 @@ func (r *MemoryToolRegistrar) handleListUnprocessed(ctx context.Context, req mcp
 	windowExpr := fmt.Sprintf("-%d days", windowDays)
 	queryArgs = append(queryArgs, owner, since, windowExpr, limit)
 
+	// Contract guarantees this list excludes:
+	//   - messages already linked as the dst_message_id of a
+	//     refines/duplicate_of/superseded_by edge (already
+	//     consolidated by an earlier dream pass), AND
+	//   - the dream worker's own output (from_agent prefix "dream:")
+	//     so the agent never re-refines its own reflections.
+	// Without these filters the agent loops on the same oldest-50
+	// messages every cycle and progress flat-lines.
 	q := `SELECT m.id, m.from_agent, c.name, m.body, m.created_at
 	        FROM messages m
 	        JOIN agents a ON m.from_agent = a.name
@@ -292,6 +300,11 @@ func (r *MemoryToolRegistrar) handleListUnprocessed(ctx context.Context, req mcp
 	         AND CAST(a.owner_id AS TEXT) = ?
 	         AND m.id > ?
 	         AND m.created_at > datetime('now', ?)
+	         AND m.from_agent NOT LIKE 'dream:%'
+	         AND m.id NOT IN (
+	             SELECT dst_message_id FROM memory_links
+	              WHERE relation_type IN ('refines','duplicate_of','superseded_by')
+	         )
 	       ORDER BY m.id ASC
 	       LIMIT ?`
 

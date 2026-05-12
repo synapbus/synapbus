@@ -75,10 +75,18 @@ func NewJobsStore(db *sql.DB) *JobsStore {
 	return &JobsStore{db: db}
 }
 
-// Create inserts a `pending` row for the (owner, jobType) pair. If
-// another job of the same type is already in flight, returns
-// ErrJobAlreadyInFlight (mapped from the partial-unique-index conflict).
+// Create inserts a `pending` row for the (owner, jobType) pair on slot 0.
+// Kept for compatibility with single-threaded callers. Returns
+// ErrJobAlreadyInFlight if slot 0 is occupied.
 func (s *JobsStore) Create(ctx context.Context, ownerID, jobType, triggerReason string) (int64, error) {
+	return s.CreateOnSlot(ctx, ownerID, jobType, triggerReason, 0)
+}
+
+// CreateOnSlot inserts a `pending` row on a specific slot. Migration 030
+// extended the partial-unique index to include `slot`, so slots 0..N-1
+// can hold concurrent in-flight jobs of the same type per owner. The
+// worker / admin CLI uses this when fanning out a backlog drain.
+func (s *JobsStore) CreateOnSlot(ctx context.Context, ownerID, jobType, triggerReason string, slot int) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("jobs store: nil store")
 	}
@@ -88,16 +96,16 @@ func (s *JobsStore) Create(ctx context.Context, ownerID, jobType, triggerReason 
 	if jobType == "" {
 		return 0, fmt.Errorf("jobs store: empty job_type")
 	}
+	if slot < 0 {
+		return 0, fmt.Errorf("jobs store: negative slot")
+	}
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO memory_consolidation_jobs
-		   (owner_id, job_type, status, trigger_reason)
-		 VALUES (?, ?, 'pending', ?)`,
-		ownerID, jobType, triggerReason,
+		   (owner_id, job_type, status, trigger_reason, slot)
+		 VALUES (?, ?, 'pending', ?, ?)`,
+		ownerID, jobType, triggerReason, slot,
 	)
 	if err != nil {
-		// modernc.org/sqlite surfaces unique-constraint conflicts via
-		// error strings; the partial-unique index is the only UNIQUE
-		// constraint that can fire here for INSERT.
 		if isUniqueConstraint(err) {
 			return 0, ErrJobAlreadyInFlight
 		}
@@ -105,6 +113,26 @@ func (s *JobsStore) Create(ctx context.Context, ownerID, jobType, triggerReason 
 	}
 	id, _ := res.LastInsertId()
 	return id, nil
+}
+
+// CreateNextAvailableSlot tries slots 0..maxSlots-1 in order and returns
+// the (jobID, slot) of the first one that wasn't already in flight. Used
+// when the worker / CLI wants to fan out N parallel jobs per cycle.
+// Returns ErrJobAlreadyInFlight if all slots are busy.
+func (s *JobsStore) CreateNextAvailableSlot(ctx context.Context, ownerID, jobType, triggerReason string, maxSlots int) (int64, int, error) {
+	if maxSlots <= 0 {
+		maxSlots = 1
+	}
+	for slot := 0; slot < maxSlots; slot++ {
+		id, err := s.CreateOnSlot(ctx, ownerID, jobType, triggerReason, slot)
+		if err == nil {
+			return id, slot, nil
+		}
+		if !errors.Is(err, ErrJobAlreadyInFlight) {
+			return 0, 0, err
+		}
+	}
+	return 0, 0, ErrJobAlreadyInFlight
 }
 
 // Dispatch flips a pending row to `dispatched` and stamps the harness

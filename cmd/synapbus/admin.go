@@ -1441,16 +1441,18 @@ Examples:
 
 	// ----- memory dream-run (feature 020 — manual dispatch) -----
 	var (
-		dreamRunOwner   string
-		dreamRunJobType string
+		dreamRunOwner    string
+		dreamRunJobType  string
+		dreamRunParallel int
 	)
 	memoryDreamRunCmd := &cobra.Command{
 		Use:   "dream-run",
-		Short: "Force a single consolidation job dispatch (bypasses trigger checks)",
+		Short: "Force a consolidation job dispatch (bypasses trigger checks). With --parallel N spawns N concurrent jobs.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := adminRequest("memory.dream_run", map[string]string{
+			resp, err := adminRequest("memory.dream_run", map[string]any{
 				"owner":    dreamRunOwner,
 				"job_type": dreamRunJobType,
+				"parallel": dreamRunParallel,
 			})
 			if err != nil {
 				return err
@@ -1461,6 +1463,7 @@ Examples:
 	}
 	memoryDreamRunCmd.Flags().StringVar(&dreamRunOwner, "owner", "", "Owner username or numeric user ID")
 	memoryDreamRunCmd.Flags().StringVar(&dreamRunJobType, "job", "reflection", "Job type (reflection | core_rewrite | dedup_contradiction | link_gen)")
+	memoryDreamRunCmd.Flags().IntVar(&dreamRunParallel, "parallel", 0, "Spawn N concurrent jobs of this type (0 = use server SYNAPBUS_DREAM_PARALLEL; core_rewrite forces 1)")
 	_ = memoryDreamRunCmd.MarkFlagRequired("owner")
 	memoryCmd.AddCommand(memoryDreamRunCmd)
 

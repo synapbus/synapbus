@@ -512,7 +512,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// going through the existing createJob + poller path; subprocess
 	// and webhook agents go through Registry.Execute.
 	harnessRegistry := harness.NewRegistry()
-	harnessRegistry.Register(k8sjob.New(k8sRunner, nil, slog.Default()))
+	// Build a ClientsetWaiter when we have a real in-cluster runner so
+	// the k8sjob backend can actually wait for Job completion. Without
+	// this the backend errors immediately with "no Waiter configured"
+	// (the failure mode dream-worker jobs were hitting pre-fix).
+	var k8sWaiter k8sjob.Waiter
+	if rr, ok := k8sRunner.(*k8spkg.K8sJobRunner); ok {
+		k8sWaiter = k8sjob.NewClientsetWaiter(rr.GetClientset(), 0)
+	}
+	harnessRegistry.Register(k8sjob.New(k8sRunner, k8sWaiter, slog.Default()))
 	// SYNAPBUS_KEEP_WORKDIR=1 preserves per-run workdirs after successful
 	// runs. Useful when debugging MCP tool traces, gemini stdout, or
 	// materialized config files. Default off to avoid disk growth.
@@ -901,6 +909,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		adminSvcs.DreamRun = func(ctx context.Context, ownerID, jobType string) (int64, error) {
 			return c.ForceRun(ctx, ownerID, jobType)
 		}
+		adminSvcs.DreamRunN = func(ctx context.Context, ownerID, jobType string, parallel int) ([]int64, error) {
+			return c.ForceRunN(ctx, ownerID, jobType, parallel)
+		}
+		adminSvcs.DefaultDreamParallel = memCfg.DreamParallel
 	}
 	adminServer := admin.NewServer(adminSocketPath, db.DB, adminSvcs, logger)
 	if err := adminServer.Start(); err != nil {

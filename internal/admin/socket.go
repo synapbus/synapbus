@@ -1987,13 +1987,15 @@ func (s *AdminServer) handleMemoryCoreDelete(ctx context.Context, args json.RawM
 	}}
 }
 
-// handleMemoryDreamRun forces a single dream-job dispatch. Bypasses
-// trigger checks — useful for kubic verification (quickstart §"verify
-// dream agent"). Returns the created job_id.
+// handleMemoryDreamRun forces dream-job dispatch(es). With parallel=1
+// (default) returns one job_id. With parallel>1, fans out N concurrent
+// jobs across slots 0..N-1 and returns the list of created ids. The
+// circuit breaker still applies.
 func (s *AdminServer) handleMemoryDreamRun(ctx context.Context, args json.RawMessage) Response {
 	var p struct {
-		Owner   string `json:"owner"`
-		JobType string `json:"job_type"`
+		Owner    string `json:"owner"`
+		JobType  string `json:"job_type"`
+		Parallel int    `json:"parallel"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return Response{OK: false, Error: "invalid args: " + err.Error()}
@@ -2001,22 +2003,34 @@ func (s *AdminServer) handleMemoryDreamRun(ctx context.Context, args json.RawMes
 	if p.JobType == "" {
 		return Response{OK: false, Error: "job_type is required"}
 	}
-	if s.services.DreamRun == nil {
+	if s.services.DreamRunN == nil {
 		return Response{OK: false, Error: "dream worker not configured (SYNAPBUS_DREAM_ENABLED=0?)"}
 	}
 	ownerStr, err := s.resolveOwnerString(ctx, p.Owner)
 	if err != nil {
 		return Response{OK: false, Error: err.Error()}
 	}
-	jobID, err := s.services.DreamRun(ctx, ownerStr, p.JobType)
-	if err != nil {
+	parallel := p.Parallel
+	if parallel <= 0 {
+		parallel = s.services.DefaultDreamParallel
+	}
+	if parallel <= 0 {
+		parallel = 1
+	}
+	ids, err := s.services.DreamRunN(ctx, ownerStr, p.JobType, parallel)
+	if err != nil && len(ids) == 0 {
 		return Response{OK: false, Error: err.Error()}
 	}
-	return Response{OK: true, Data: map[string]any{
-		"job_id":   jobID,
+	out := map[string]any{
+		"job_ids":  ids,
 		"owner_id": ownerStr,
 		"job_type": p.JobType,
-	}}
+		"parallel": parallel,
+	}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	return Response{OK: true, Data: out}
 }
 
 // Ensure the messaging import is used.

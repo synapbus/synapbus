@@ -45,6 +45,14 @@ type MemoryConfig struct {
 	// DreamMaxConcurrent caps the number of owners with in-flight jobs.
 	DreamMaxConcurrent int
 
+	// DreamParallel is the number of concurrent dream jobs the worker
+	// (and `synapbus memory dream-run`) will fan out per (owner, job_type)
+	// when triggered. 1 = historical single-job behaviour. Higher values
+	// let one watermark/manual trigger spawn N parallel reflection /
+	// link_gen / dedup_contradiction agents to drain a backlog. core_rewrite
+	// is always single-slot regardless of this knob.
+	DreamParallel int
+
 	// DreamWallclockBudget caps how long a single consolidation job is
 	// allowed to run before the worker terminates it with status=partial.
 	DreamWallclockBudget time.Duration
@@ -96,6 +104,7 @@ func DefaultMemoryConfig() MemoryConfig {
 		DreamInterval:         1 * time.Hour,
 		DreamDeepCron:         "0 3 * * *",
 		DreamMaxConcurrent:    4,
+		DreamParallel:         1,
 		DreamWallclockBudget:  10 * time.Minute,
 		DreamWatermark:        20,
 		DreamAgent:            "claude-code",
@@ -154,6 +163,11 @@ func ParseMemoryConfig() MemoryConfig {
 	if v := os.Getenv("SYNAPBUS_DREAM_MAX_CONCURRENT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.DreamMaxConcurrent = n
+		}
+	}
+	if v := os.Getenv("SYNAPBUS_DREAM_PARALLEL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.DreamParallel = n
 		}
 	}
 	if v := os.Getenv("SYNAPBUS_DREAM_WALLCLOCK_BUDGET"); v != "" {
