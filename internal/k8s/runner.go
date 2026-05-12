@@ -2,11 +2,14 @@ package k8s
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -94,7 +97,17 @@ func (r *K8sJobRunner) GetNamespace() string {
 }
 
 func (r *K8sJobRunner) CreateJob(ctx context.Context, handler *K8sHandler, msg *JobMessage) (string, error) {
-	jobName := sanitizeJobName(fmt.Sprintf("synapbus-%s-%d", handler.AgentName, msg.MessageID))
+	// When there is no triggering message (e.g. dream-worker dispatches
+	// where Message=nil → MessageID=0), fall back to a unique suffix so
+	// concurrent runs don't collide on the Job name. Format keeps the
+	// historic "synapbus-<agent>-<id>" prefix for log/grep continuity.
+	suffix := fmt.Sprintf("%d", msg.MessageID)
+	if msg.MessageID == 0 {
+		var b [4]byte
+		_, _ = rand.Read(b[:])
+		suffix = fmt.Sprintf("%d-%s", time.Now().UnixNano()%1_000_000, hex.EncodeToString(b[:]))
+	}
+	jobName := sanitizeJobName(fmt.Sprintf("synapbus-%s-%s", handler.AgentName, suffix))
 
 	namespace := handler.Namespace
 	if namespace == "" {

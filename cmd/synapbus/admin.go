@@ -702,10 +702,10 @@ func addAdminCommands(rootCmd *cobra.Command) {
 	channelsJoinCmd.MarkFlagRequired("agent")
 
 	var (
-		channelsUpdateName               string
-		channelsUpdateAutoApprove        string
-		channelsUpdateStalemateRemind    string
-		channelsUpdateStalemateEscalate  string
+		channelsUpdateName              string
+		channelsUpdateAutoApprove       string
+		channelsUpdateStalemateRemind   string
+		channelsUpdateStalemateEscalate string
 	)
 	channelsUpdateCmd := &cobra.Command{
 		Use:   "update",
@@ -1341,10 +1341,136 @@ Examples:
 	harnessConfigCmd.AddCommand(harnessConfigGetCmd, harnessConfigSetCmd, harnessConfigEditCmd)
 	harnessCmd.AddCommand(harnessConfigCmd)
 
+	// ----- memory commands (feature 020 — proactive memory + dream worker) -----
+	memoryCmd := &cobra.Command{
+		Use:   "memory",
+		Short: "Manage proactive memory (feature 020)",
+	}
+
+	memoryCoreCmd := &cobra.Command{
+		Use:   "core",
+		Short: "Manage per-(owner, agent) core memory blobs",
+	}
+
+	var (
+		memCoreOwner    string
+		memCoreAgent    string
+		memCoreBlob     string
+		memCoreBlobFile string
+		memCoreUpdater  string
+	)
+
+	memoryCoreGetCmd := &cobra.Command{
+		Use:   "get",
+		Short: "Print the current core memory blob for an (owner, agent)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("memory.core.get", map[string]string{
+				"owner": memCoreOwner,
+				"agent": memCoreAgent,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	memoryCoreGetCmd.Flags().StringVar(&memCoreOwner, "owner", "", "Owner username or numeric user ID")
+	memoryCoreGetCmd.Flags().StringVar(&memCoreAgent, "agent", "", "Agent name")
+	_ = memoryCoreGetCmd.MarkFlagRequired("owner")
+	_ = memoryCoreGetCmd.MarkFlagRequired("agent")
+
+	memoryCoreSetCmd := &cobra.Command{
+		Use:   "set",
+		Short: "Replace the core memory blob (wholesale, no merge)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			blob := memCoreBlob
+			if memCoreBlobFile != "" {
+				data, err := os.ReadFile(memCoreBlobFile)
+				if err != nil {
+					return fmt.Errorf("read --blob-file: %w", err)
+				}
+				blob = string(data)
+			}
+			if blob == "" {
+				return fmt.Errorf("either --blob or --blob-file is required (non-empty)")
+			}
+			resp, err := adminRequest("memory.core.set", map[string]string{
+				"owner":      memCoreOwner,
+				"agent":      memCoreAgent,
+				"blob":       blob,
+				"updated_by": memCoreUpdater,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	memoryCoreSetCmd.Flags().StringVar(&memCoreOwner, "owner", "", "Owner username or numeric user ID")
+	memoryCoreSetCmd.Flags().StringVar(&memCoreAgent, "agent", "", "Agent name")
+	memoryCoreSetCmd.Flags().StringVar(&memCoreBlob, "blob", "", "Core memory blob (inline)")
+	memoryCoreSetCmd.Flags().StringVar(&memCoreBlobFile, "blob-file", "", "Read blob from file path (overrides --blob)")
+	memoryCoreSetCmd.Flags().StringVar(&memCoreUpdater, "updated-by", "human", "updated_by audit field (default: human)")
+	_ = memoryCoreSetCmd.MarkFlagRequired("owner")
+	_ = memoryCoreSetCmd.MarkFlagRequired("agent")
+
+	memoryCoreDeleteCmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Remove the core memory blob",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("memory.core.delete", map[string]string{
+				"owner": memCoreOwner,
+				"agent": memCoreAgent,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	memoryCoreDeleteCmd.Flags().StringVar(&memCoreOwner, "owner", "", "Owner username or numeric user ID")
+	memoryCoreDeleteCmd.Flags().StringVar(&memCoreAgent, "agent", "", "Agent name")
+	_ = memoryCoreDeleteCmd.MarkFlagRequired("owner")
+	_ = memoryCoreDeleteCmd.MarkFlagRequired("agent")
+
+	memoryCoreCmd.AddCommand(memoryCoreGetCmd, memoryCoreSetCmd, memoryCoreDeleteCmd)
+	memoryCmd.AddCommand(memoryCoreCmd)
+
+	// ----- memory dream-run (feature 020 — manual dispatch) -----
+	var (
+		dreamRunOwner    string
+		dreamRunJobType  string
+		dreamRunParallel int
+	)
+	memoryDreamRunCmd := &cobra.Command{
+		Use:   "dream-run",
+		Short: "Force a consolidation job dispatch (bypasses trigger checks). With --parallel N spawns N concurrent jobs.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := adminRequest("memory.dream_run", map[string]any{
+				"owner":    dreamRunOwner,
+				"job_type": dreamRunJobType,
+				"parallel": dreamRunParallel,
+			})
+			if err != nil {
+				return err
+			}
+			printJSON(resp["data"])
+			return nil
+		},
+	}
+	memoryDreamRunCmd.Flags().StringVar(&dreamRunOwner, "owner", "", "Owner username or numeric user ID")
+	memoryDreamRunCmd.Flags().StringVar(&dreamRunJobType, "job", "reflection", "Job type (reflection | core_rewrite | dedup_contradiction | link_gen)")
+	memoryDreamRunCmd.Flags().IntVar(&dreamRunParallel, "parallel", 0, "Spawn N concurrent jobs of this type (0 = use server SYNAPBUS_DREAM_PARALLEL; core_rewrite forces 1)")
+	_ = memoryDreamRunCmd.MarkFlagRequired("owner")
+	memoryCmd.AddCommand(memoryDreamRunCmd)
+
 	// ----- add persistent flag and commands to root -----
 	rootCmd.PersistentFlags().StringVar(&adminSocket, "socket", "/tmp/synapbus.sock", "Path to admin Unix socket")
 
-	rootCmd.AddCommand(userCmd, agentCmd, auditCmd, backupCmd, messagesCmd, channelsCmd, conversationsCmd, embeddingsCmd, dbCmd, retentionCmd, webhookCmd, k8sCmd, attachmentsCmd, harnessCmd)
+	rootCmd.AddCommand(userCmd, agentCmd, auditCmd, backupCmd, messagesCmd, channelsCmd, conversationsCmd, embeddingsCmd, dbCmd, retentionCmd, webhookCmd, k8sCmd, attachmentsCmd, harnessCmd, memoryCmd)
 }
 
 // toTableRows remaps []map[string]string using a header->key mapping.

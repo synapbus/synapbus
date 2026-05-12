@@ -26,6 +26,7 @@ import (
 	"github.com/synapbus/synapbus/internal/a2a"
 	"github.com/synapbus/synapbus/internal/actions"
 	"github.com/synapbus/synapbus/internal/admin"
+	"github.com/synapbus/synapbus/internal/agentquery"
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/api"
 	"github.com/synapbus/synapbus/internal/apikeys"
@@ -34,51 +35,50 @@ import (
 	"github.com/synapbus/synapbus/internal/auth/idp"
 	"github.com/synapbus/synapbus/internal/channels"
 	"github.com/synapbus/synapbus/internal/console"
+	"github.com/synapbus/synapbus/internal/dispatcher"
 	"github.com/synapbus/synapbus/internal/goals"
 	"github.com/synapbus/synapbus/internal/goaltasks"
-	"github.com/synapbus/synapbus/internal/secrets"
-	"github.com/synapbus/synapbus/internal/dispatcher"
-	"github.com/synapbus/synapbus/internal/health"
-	"github.com/synapbus/synapbus/internal/jsruntime"
-	k8spkg "github.com/synapbus/synapbus/internal/k8s"
-	"github.com/synapbus/synapbus/internal/marketplace"
-	mcpserver "github.com/synapbus/synapbus/internal/mcp"
-	"github.com/synapbus/synapbus/internal/agentquery"
-	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
-	"github.com/synapbus/synapbus/internal/messaging"
-	prommetrics "github.com/synapbus/synapbus/internal/metrics"
 	"github.com/synapbus/synapbus/internal/harness"
 	"github.com/synapbus/synapbus/internal/harness/docker"
 	"github.com/synapbus/synapbus/internal/harness/k8sjob"
 	"github.com/synapbus/synapbus/internal/harness/runs"
 	"github.com/synapbus/synapbus/internal/harness/subprocess"
 	"github.com/synapbus/synapbus/internal/harness/webhook"
+	"github.com/synapbus/synapbus/internal/health"
+	"github.com/synapbus/synapbus/internal/jsruntime"
+	k8spkg "github.com/synapbus/synapbus/internal/k8s"
+	"github.com/synapbus/synapbus/internal/marketplace"
+	mcpserver "github.com/synapbus/synapbus/internal/mcp"
+	"github.com/synapbus/synapbus/internal/messaging"
+	prommetrics "github.com/synapbus/synapbus/internal/metrics"
 	"github.com/synapbus/synapbus/internal/observability"
+	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/reactions"
+	reactorpkg "github.com/synapbus/synapbus/internal/reactor"
 	"github.com/synapbus/synapbus/internal/search"
 	"github.com/synapbus/synapbus/internal/search/embedding"
+	"github.com/synapbus/synapbus/internal/secrets"
 	"github.com/synapbus/synapbus/internal/storage"
-	"github.com/synapbus/synapbus/internal/push"
 	"github.com/synapbus/synapbus/internal/trace"
 	"github.com/synapbus/synapbus/internal/trust"
 	"github.com/synapbus/synapbus/internal/web"
-	"github.com/synapbus/synapbus/internal/wiki"
 	"github.com/synapbus/synapbus/internal/webhooks"
+	"github.com/synapbus/synapbus/internal/wiki"
 )
 
 // version is set at build time via -ldflags "-X main.version=..."
 var version = "dev"
 
 var (
-	host              string
-	port              int
-	dataDir           string
-	logLevel          string
-	metricsEnabled    bool
-	traceRetention    string
-	adminSocketPath   string
-	webhookWorkers    int
-	messageRetention  string
+	host             string
+	port             int
+	dataDir          string
+	logLevel         string
+	metricsEnabled   bool
+	traceRetention   string
+	adminSocketPath  string
+	webhookWorkers   int
+	messageRetention string
 )
 
 func main() {
@@ -512,7 +512,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// going through the existing createJob + poller path; subprocess
 	// and webhook agents go through Registry.Execute.
 	harnessRegistry := harness.NewRegistry()
-	harnessRegistry.Register(k8sjob.New(k8sRunner, nil, slog.Default()))
+	// Build a ClientsetWaiter when we have a real in-cluster runner so
+	// the k8sjob backend can actually wait for Job completion. Without
+	// this the backend errors immediately with "no Waiter configured"
+	// (the failure mode dream-worker jobs were hitting pre-fix).
+	var k8sWaiter k8sjob.Waiter
+	if rr, ok := k8sRunner.(*k8spkg.K8sJobRunner); ok {
+		k8sWaiter = k8sjob.NewClientsetWaiter(rr.GetClientset(), 0)
+	}
+	harnessRegistry.Register(k8sjob.New(k8sRunner, k8sWaiter, slog.Default()))
 	// SYNAPBUS_KEEP_WORKDIR=1 preserves per-run workdirs after successful
 	// runs. Useful when debugging MCP tool traces, gemini stdout, or
 	// materialized config files. Default off to avoid disk growth.
@@ -582,6 +590,49 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	mcpSrv := mcpserver.NewMCPServer(msgService, agentService, channelService, swarmService, attachmentService, searchService, reactionService, trustService, wikiService, con, jsPool, actionRegistry, actionIndex, db.DB)
 
+	// Feature 020 — proactive memory injection.
+	//
+	// Parse the memory config from env, build the audit-ring store and
+	// the per-(owner, agent) core memory store, and wire both into the
+	// MCP hybrid tool surface. When SYNAPBUS_INJECTION_ENABLED=0 (the
+	// default), SetInjection still runs but WrapInjection returns each
+	// handler unchanged, so tool responses keep their pre-feature shape
+	// bit-for-bit (FR-012, SC-009).
+	memCfg := messaging.ParseMemoryConfig()
+	memoryInjectionStore := messaging.NewMemoryInjections(db.DB)
+	coreMemoryStore := messaging.NewCoreMemoryStore(db.DB, memCfg.CoreMemoryMaxBytes)
+	mcpSrv.SetInjection(memCfg, memoryInjectionStore, messaging.NewCoreProvider(coreMemoryStore))
+	slog.Info("proactive memory injection wired",
+		"enabled", memCfg.InjectionEnabled,
+		"budget_tokens", memCfg.InjectionBudgetTokens,
+		"core_max_bytes", memCfg.CoreMemoryMaxBytes,
+	)
+
+	// Feature 020 — dream worker (US3) stores. These are always
+	// constructed so admin CLI / future REST endpoints can read them
+	// even when SYNAPBUS_DREAM_ENABLED=0. The worker itself starts
+	// only when the flag is on.
+	memoryLinkStore := messaging.NewLinkStore(db.DB)
+	memoryPinStore := messaging.NewPinStore(db.DB)
+	memoryJobsStore := messaging.NewJobsStore(db.DB)
+	dispatchTokens := messaging.NewDispatchTokenStore(db.DB)
+
+	// Wire the auto-link emitter as a message listener (T035).
+	msgService.AddMessageListener(messaging.NewAutoLinkListener(db.DB, memoryLinkStore))
+
+	// Register the six memory_* MCP tools when SYNAPBUS_DREAM_ENABLED=1.
+	mcpSrv.SetDream(mcpserver.MemoryToolDeps{
+		DB:        db.DB,
+		Msg:       msgService,
+		Agents:    agentService,
+		Core:      coreMemoryStore,
+		Links:     memoryLinkStore,
+		Pins:      memoryPinStore,
+		Jobs:      memoryJobsStore,
+		Tokens:    dispatchTokens,
+		MemConfig: memCfg,
+	})
+
 	// Wire the agent marketplace (spec 016 MVP).
 	marketplaceStore := marketplace.NewStore(db.DB)
 	marketplaceSvc := marketplace.NewService(marketplaceStore, wikiService, swarmService, channelService, msgService, tracer)
@@ -599,7 +650,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		db.DB,
 	)
 	mcpSrv.WireGoalsTools(goalsToolReg)
-	slog.Info("spec-018 MCP tools wired (create_goal, propose_task_tree, propose_agent, claim_task, request_resource, list_resources)")
+	slog.Info("spec-018 MCP tools wired (create_goal, propose_task_tree, claim_task, request_resource, list_resources, complete_goal)")
 
 	// Set up SQL query executor for agents (uses read pool if available)
 	queryDB := db.QueryDB()
@@ -645,14 +696,42 @@ func runServe(cmd *cobra.Command, args []string) error {
 		slog.Info("stalemate worker disabled by SYNAPBUS_DISABLE_STALEMATE_WORKER=1")
 	} else {
 		stalemateConfig := messaging.ParseStalemateConfig()
-		stalemateWorker = messaging.NewStalemateWorker(db.DB, msgService, &channelLookupAdapter{channelService: channelService}, stalemateConfig)
+		stalemateWorker = messaging.NewStalemateWorker(db.DB, msgService, stalemateConfig)
+		stalemateWorker.SetMemoryInjections(memoryInjectionStore)
 		stalemateWorker.Start()
 		slog.Info("stalemate worker started",
 			"processing_timeout", stalemateConfig.ProcessingTimeout.String(),
-			"reminder_after", stalemateConfig.ReminderAfter.String(),
-			"escalate_after", stalemateConfig.EscalateAfter.String(),
 			"interval", stalemateConfig.Interval.String(),
 		)
+	}
+
+	// Feature 020 — consolidator (dream) worker. Only starts when
+	// SYNAPBUS_DREAM_ENABLED=1.
+	var consolidator *messaging.ConsolidatorWorker
+	if memCfg.DreamEnabled {
+		consolidator = messaging.NewConsolidatorWorker(
+			db.DB,
+			memoryJobsStore,
+			dispatchTokens,
+			&harnessDispatcherAdapter{reg: harnessRegistry},
+			&agentLookupAdapter{svc: agentService},
+			memCfg,
+		)
+		// Wire per-(owner, day) circuit breaker. The gate skips
+		// dispatch (and records a circuit_broken job) once any of
+		// SYNAPBUS_DREAM_DAILY_{TOKEN_LIMIT_IN,TOKEN_LIMIT_OUT,JOB_LIMIT}
+		// is exceeded for the owner.
+		dreamUsageStore := messaging.NewDreamUsageStore(db.DB)
+		consolidator.SetUsageGate(dreamUsageStore, messaging.NewUsageGate(memCfg, dreamUsageStore))
+		consolidator.Start()
+		slog.Info("consolidator (dream) worker started",
+			"interval", memCfg.DreamInterval.String(),
+			"watermark", memCfg.DreamWatermark,
+			"max_concurrent", memCfg.DreamMaxConcurrent,
+			"agent", memCfg.DreamAgent,
+		)
+	} else {
+		slog.Info("consolidator (dream) worker disabled (SYNAPBUS_DREAM_ENABLED=0)")
 	}
 
 	// Create health checker
@@ -791,6 +870,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		GoalTasksService:  goalTasksService,
 		BaseURL:           baseURL,
 		WikiService:       wikiService,
+		CoreMemoryStore:   coreMemoryStore,
 	})
 	r.Mount("/", apiRouter)
 
@@ -799,13 +879,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start admin socket server
 	adminSvcs := &admin.Services{
-		Users:             userStore,
-		Sessions:          sessionStore,
-		Agents:            agentService,
-		Messages:          msgService,
-		Channels:          channelService,
-		Traces:            traceStore,
-		DataDir:           dataDir,
+		Users:    userStore,
+		Sessions: sessionStore,
+		Agents:   agentService,
+		Messages: msgService,
+		Channels: channelService,
+		Traces:   traceStore,
+		DataDir:  dataDir,
 	}
 	// Wire optional services into admin (may be nil if not configured)
 	if searchCfg.IsEnabled() {
@@ -821,6 +901,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	adminSvcs.WebhookService = webhookService
 	adminSvcs.K8sService = k8sService
+	adminSvcs.CoreMemoryStore = coreMemoryStore
+	if consolidator != nil {
+		// Closure form keeps admin's import graph independent of
+		// messaging.ConsolidatorWorker's full surface.
+		c := consolidator
+		adminSvcs.DreamRun = func(ctx context.Context, ownerID, jobType string) (int64, error) {
+			return c.ForceRun(ctx, ownerID, jobType)
+		}
+		adminSvcs.DreamRunN = func(ctx context.Context, ownerID, jobType string, parallel int) ([]int64, error) {
+			return c.ForceRunN(ctx, ownerID, jobType, parallel)
+		}
+		adminSvcs.DefaultDreamParallel = memCfg.DreamParallel
+	}
 	adminServer := admin.NewServer(adminSocketPath, db.DB, adminSvcs, logger)
 	if err := adminServer.Start(); err != nil {
 		return fmt.Errorf("start admin socket: %w", err)
@@ -884,6 +977,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Stop stalemate worker
 	if stalemateWorker != nil {
 		stalemateWorker.Stop()
+	}
+
+	// Stop consolidator (dream) worker
+	if consolidator != nil {
+		consolidator.Stop()
 	}
 
 	// Stop embedding pipeline
@@ -1158,19 +1256,6 @@ func ensureDefaultMCPClient(ctx context.Context, db *sql.DB, bcryptCost int) {
 	)
 }
 
-// channelLookupAdapter adapts channels.Service to messaging.ChannelLookup.
-type channelLookupAdapter struct {
-	channelService *channels.Service
-}
-
-func (a *channelLookupAdapter) GetChannelIDByName(ctx context.Context, name string) (int64, error) {
-	ch, err := a.channelService.GetChannelByName(ctx, name)
-	if err != nil {
-		return 0, err
-	}
-	return ch.ID, nil
-}
-
 // trustAdjusterAdapter adapts trust.Service to reactions.TrustAdjuster.
 type trustAdjusterAdapter struct {
 	svc *trust.Service
@@ -1210,4 +1295,79 @@ func (a *messageAuthorResolverAdapter) GetMessageAuthor(ctx context.Context, mes
 		return "", err
 	}
 	return msg.FromAgent, nil
+}
+
+// agentLookupAdapter adapts agents.AgentService to
+// messaging.AgentLookup so the dream worker can resolve the dream-agent
+// record without dragging the full *agents.AgentService into the
+// messaging package. The returned messaging.DreamAgent is the raw
+// *agents.Agent itself — DreamAgent's only required method
+// (AgentName()) is satisfied by agents.Agent.Name via the
+// agentNameMethod helper below.
+type agentLookupAdapter struct {
+	svc *agents.AgentService
+}
+
+func (a *agentLookupAdapter) GetAgent(ctx context.Context, name string) (messaging.DreamAgent, error) {
+	ag, err := a.svc.GetAgent(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return agentDreamWrap{ag: ag}, nil
+}
+
+// agentDreamWrap adapts *agents.Agent to messaging.DreamAgent.
+type agentDreamWrap struct{ ag *agents.Agent }
+
+func (w agentDreamWrap) AgentName() string {
+	if w.ag == nil {
+		return ""
+	}
+	return w.ag.Name
+}
+
+// harnessDispatcherAdapter adapts *harness.Registry to
+// messaging.HarnessDispatcher so the consolidator worker can dispatch
+// dream-agent runs without importing the harness package (which would
+// create an import cycle — harness already imports messaging).
+type harnessDispatcherAdapter struct {
+	reg *harness.Registry
+}
+
+func (a *harnessDispatcherAdapter) Execute(
+	ctx context.Context,
+	agent messaging.DreamAgent,
+	req *messaging.HarnessExecRequest,
+) (*messaging.HarnessExecResult, error) {
+	// Unbox the agent record. The worker stores a DreamAgent
+	// interface; in production it's an agentDreamWrap holding the
+	// real *agents.Agent. Tests / admin force-runs may pass a bare
+	// DreamAgentNamed which has no underlying record — the harness
+	// fallback chain then resolves the backend by name alone.
+	var realAgent *agents.Agent
+	if wrap, ok := agent.(agentDreamWrap); ok {
+		realAgent = wrap.ag
+	}
+	hreq := &harness.ExecRequest{
+		RunID:     req.RunID,
+		AgentName: req.AgentName,
+		Agent:     realAgent,
+		Env:       req.Env,
+		Budget:    harness.Budget{MaxWallClock: req.MaxWallClock},
+	}
+	if req.Body != "" {
+		hreq.Message = &messaging.Message{Body: req.Body}
+	}
+	res, err := a.reg.Execute(ctx, realAgent, hreq)
+	if err != nil {
+		return nil, err
+	}
+	out := &messaging.HarnessExecResult{}
+	if res != nil {
+		out.ExitCode = res.ExitCode
+		out.Logs = res.Logs
+		out.TokensIn = res.Usage.TokensIn
+		out.TokensOut = res.Usage.TokensOut
+	}
+	return out, nil
 }

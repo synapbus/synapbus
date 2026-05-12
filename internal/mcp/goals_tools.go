@@ -52,18 +52,21 @@ func NewGoalsToolRegistrar(
 	}
 }
 
-// RegisterAllOnServer attaches create_goal, propose_task_tree,
-// propose_agent, claim_task, request_resource, list_resources, and
-// complete_goal to the MCP server.
+// RegisterAllOnServer attaches create_goal, propose_task_tree, claim_task,
+// request_resource, list_resources, and complete_goal to the MCP server.
+//
+// propose_agent was removed when SynapBus moved to internal-only mode: it
+// wrote a pending row to agent_proposals for human approval via #approvals,
+// and that approval surface no longer exists. Agents are created via the
+// admin CLI directly. See migration 027_remove_approval_noise.sql.
 func (r *GoalsToolRegistrar) RegisterAllOnServer(s *server.MCPServer) {
 	s.AddTool(r.createGoalTool(), r.handleCreateGoal)
 	s.AddTool(r.proposeTaskTreeTool(), r.handleProposeTaskTree)
-	s.AddTool(r.proposeAgentTool(), r.handleProposeAgent)
 	s.AddTool(r.claimTaskTool(), r.handleClaimTask)
 	s.AddTool(r.requestResourceTool(), r.handleRequestResource)
 	s.AddTool(r.listResourcesTool(), r.handleListResources)
 	s.AddTool(r.completeGoalTool(), r.handleCompleteGoal)
-	r.logger.Info("spec-018 MCP tools registered", "count", 7)
+	r.logger.Info("spec-018 MCP tools registered", "count", 6)
 }
 
 // --- Tool Definitions ---
@@ -84,18 +87,6 @@ func (r *GoalsToolRegistrar) proposeTaskTreeTool() mcplib.Tool {
 		mcplib.WithDescription("Materialize a task tree under a goal. The tree field is a JSON TreeNode with {title, description, acceptance_criteria, billing_code, children[]}. Tasks are inserted in 'approved' status so specialists can claim them immediately."),
 		mcplib.WithNumber("goal_id", mcplib.Description("Goal id from create_goal"), mcplib.Required()),
 		mcplib.WithString("tree", mcplib.Description("JSON-encoded TreeNode"), mcplib.Required()),
-	)
-}
-
-func (r *GoalsToolRegistrar) proposeAgentTool() mcplib.Tool {
-	return mcplib.NewTool("propose_agent",
-		mcplib.WithDescription("Propose creating a new specialist agent. Writes an agent_proposals row so a human can approve it via the #approvals channel. Returns the proposal id."),
-		mcplib.WithString("name", mcplib.Description("Desired agent name"), mcplib.Required()),
-		mcplib.WithString("display_name", mcplib.Description("Human-readable display name")),
-		mcplib.WithString("system_prompt", mcplib.Description("System prompt for the spawned agent"), mcplib.Required()),
-		mcplib.WithString("tool_scope", mcplib.Description("Comma-separated scope (e.g. 'messages:read,messages:send')")),
-		mcplib.WithNumber("parent_task_id", mcplib.Description("The task this agent will work on")),
-		mcplib.WithString("autonomy_tier", mcplib.Description("supervised | assisted | autonomous (default assisted)")),
 	)
 }
 
@@ -236,71 +227,6 @@ func (r *GoalsToolRegistrar) handleProposeTaskTree(ctx context.Context, req mcpl
 	return resultJSON(map[string]any{
 		"root_task_id": rootID,
 		"task_count":   len(allIDs),
-	})
-}
-
-func (r *GoalsToolRegistrar) handleProposeAgent(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	agentName, ok := extractAgentName(ctx)
-	if !ok {
-		return mcplib.NewToolResultError("authentication required"), nil
-	}
-	if r.db == nil {
-		return mcplib.NewToolResultError("db not configured"), nil
-	}
-	name := req.GetString("name", "")
-	if name == "" {
-		return mcplib.NewToolResultError("name is required"), nil
-	}
-	systemPrompt := req.GetString("system_prompt", "")
-	if systemPrompt == "" {
-		return mcplib.NewToolResultError("system_prompt is required"), nil
-	}
-	toolScope := req.GetString("tool_scope", "")
-	if toolScope == "" {
-		toolScope = "[]"
-	} else if !strings.HasPrefix(toolScope, "[") {
-		// Accept comma-separated convenience form.
-		parts := strings.Split(toolScope, ",")
-		for i := range parts {
-			parts[i] = `"` + strings.TrimSpace(parts[i]) + `"`
-		}
-		toolScope = "[" + strings.Join(parts, ",") + "]"
-	}
-	tier := req.GetString("autonomy_tier", "assisted")
-	parentTaskID := int64(req.GetInt("parent_task_id", 0))
-	if parentTaskID <= 0 {
-		return mcplib.NewToolResultError("parent_task_id is required (proposals must attach to a task)"), nil
-	}
-
-	agent, err := r.agents.GetAgent(ctx, agentName)
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("resolve caller: %s", err)), nil
-	}
-
-	// Resolve goal_id from the parent task.
-	var goalID int64
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT goal_id FROM goal_tasks WHERE id=?`, parentTaskID).Scan(&goalID); err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("resolve goal from task %d: %s", parentTaskID, err)), nil
-	}
-
-	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO agent_proposals (
-			proposer_agent_id, goal_id, parent_task_id, proposed_name,
-			proposed_model, proposed_system_prompt, proposed_tool_scope_json,
-			proposed_autonomy_tier, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-		agent.ID, goalID, parentTaskID, name,
-		"gemini-2.5-flash", systemPrompt, toolScope, tier)
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("insert proposal: %s", err)), nil
-	}
-	id, _ := res.LastInsertId()
-
-	return resultJSON(map[string]any{
-		"proposal_id": id,
-		"status":      "pending",
-		"name":        name,
 	})
 }
 

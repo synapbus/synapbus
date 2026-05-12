@@ -34,20 +34,40 @@ type K8sServiceProvider interface {
 
 // Services holds references to all services the admin socket can control.
 type Services struct {
-	Users              *auth.SQLiteUserStore
-	Sessions           auth.SessionStore
-	Agents             *agents.AgentService
-	Messages           *messaging.MessagingService
-	Channels           *channels.Service
-	Traces             trace.TraceStore
-	EmbeddingStore     *search.EmbeddingStore
-	VectorIndex        *search.VectorIndex
-	SearchService      *search.Service
-	AttachmentService  *attachments.Service
-	WebhookService     WebhookServiceProvider
-	K8sService         K8sServiceProvider
-	DataDir            string
-	RetentionWorker    RetentionStatusProvider
+	Users             *auth.SQLiteUserStore
+	Sessions          auth.SessionStore
+	Agents            *agents.AgentService
+	Messages          *messaging.MessagingService
+	Channels          *channels.Service
+	Traces            trace.TraceStore
+	EmbeddingStore    *search.EmbeddingStore
+	VectorIndex       *search.VectorIndex
+	SearchService     *search.Service
+	AttachmentService *attachments.Service
+	WebhookService    WebhookServiceProvider
+	K8sService        K8sServiceProvider
+	DataDir           string
+	RetentionWorker   RetentionStatusProvider
+
+	// CoreMemoryStore is the per-(owner, agent) core memory store wired
+	// in for feature 020 admin CLI commands (`synapbus memory core ...`).
+	// May be nil — handlers report "core memory store not configured".
+	CoreMemoryStore *messaging.CoreMemoryStore
+
+	// DreamRun, when non-nil, dispatches a single consolidation job
+	// bypassing the trigger check. Wired by main.go when the
+	// consolidator worker is enabled. Closure form keeps the worker
+	// internals out of the admin package's import graph.
+	DreamRun func(ctx context.Context, ownerID, jobType string) (jobID int64, err error)
+
+	// DreamRunN fans out N parallel consolidation jobs (via slot 0..N-1)
+	// for one (owner, job_type). Used by `synapbus memory dream-run
+	// --parallel N`. core_rewrite always coerces to N=1 server-side.
+	DreamRunN func(ctx context.Context, ownerID, jobType string, parallel int) (jobIDs []int64, err error)
+
+	// DefaultDreamParallel is consulted when the CLI request omits
+	// --parallel. Sourced from MemoryConfig.DreamParallel.
+	DefaultDreamParallel int
 }
 
 // RetentionStatusProvider provides retention status information.

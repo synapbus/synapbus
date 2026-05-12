@@ -1,0 +1,171 @@
+# synapbus-watchdog: hourly k8s CronJob that checks dream-worker health
+# and scales synapbus/synapbus to 0 replicas if any red-flag trips.
+# Goal: prevent runaway Claude Code token drain while Algis is AFK.
+#
+# Cadence: every hour at :05 past (covers the requested +2h and +4h
+# horizons and keeps catching problems indefinitely until disabled).
+#
+# Disable with:
+#   microk8s kubectl -n synapbus patch cronjob synapbus-watchdog \
+#     -p '{"spec":{"suspend":true}}'
+#
+# Stop manually:
+#   microk8s kubectl -n synapbus delete cronjob synapbus-watchdog
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: synapbus-watchdog
+  namespace: synapbus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: synapbus-watchdog
+  namespace: synapbus
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: synapbus-watchdog
+  namespace: synapbus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: synapbus-watchdog
+subjects:
+  - kind: ServiceAccount
+    name: synapbus-watchdog
+    namespace: synapbus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: synapbus-watchdog-script
+  namespace: synapbus
+data:
+  watchdog.sh: |
+    #!/bin/bash
+    set -uo pipefail
+    NS=synapbus
+    DEPLOY=synapbus
+    LOG_PREFIX="[watchdog $(date -u +%FT%TZ)]"
+
+    log() { echo "$LOG_PREFIX $*"; }
+    fail() { log "RED-FLAG: $*"; STOP=1; STOP_REASON="$*"; }
+    STOP=0
+    STOP_REASON=""
+
+    # 1) Pod state
+    POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=synapbus \
+           -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "$POD" ]; then fail "no synapbus pod"; else
+      READY=$(kubectl -n $NS get pod "$POD" \
+        -o jsonpath='{.status.containerStatuses[?(@.name=="synapbus")].ready}')
+      RESTARTS=$(kubectl -n $NS get pod "$POD" \
+        -o jsonpath='{.status.containerStatuses[?(@.name=="synapbus")].restartCount}')
+      log "pod=$POD ready=$READY restarts=$RESTARTS"
+      [ "$READY" = "true" ] || fail "pod not ready"
+      [ "${RESTARTS:-0}" -le 3 ] || fail "restart count $RESTARTS > 3"
+    fi
+
+    # 2) Dream-job hourly aggregate
+    if [ -n "$POD" ]; then
+      ROW=$(kubectl -n $NS exec "$POD" -- sqlite3 /data/synapbus.db \
+        "SELECT COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0), \
+                COALESCE(SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END),0), \
+                COALESCE(SUM(CASE WHEN status IN ('running','dispatched','pending') THEN 1 ELSE 0 END),0), \
+                COALESCE(COUNT(*),0) \
+         FROM memory_consolidation_jobs \
+         WHERE created_at > datetime('now','-1 hour');" 2>/dev/null \
+        | tr '|' ' ')
+      SUCC=$(echo "$ROW" | awk '{print $1}')
+      FAIL=$(echo "$ROW" | awk '{print $2}')
+      INFL=$(echo "$ROW" | awk '{print $3}')
+      TOTAL=$(echo "$ROW" | awk '{print $4}')
+      log "last_1h jobs total=$TOTAL succ=$SUCC fail=$FAIL in_flight=$INFL"
+      [ "${FAIL:-0}" -le 20 ] || fail "failed jobs in last 1h = $FAIL > 20"
+    fi
+
+    # 3) Today's usage
+    if [ -n "$POD" ]; then
+      U=$(kubectl -n $NS exec "$POD" -- sqlite3 /data/synapbus.db \
+        "SELECT COALESCE(jobs_started,0), COALESCE(tokens_in,0), \
+                COALESCE(jobs_succeeded,0), COALESCE(jobs_failed,0), \
+                COALESCE(jobs_circuit_broken,0) \
+         FROM memory_dream_usage WHERE date=date('now') AND owner_id='2';" 2>/dev/null \
+        | tr '|' ' ')
+      JS=$(echo "$U" | awk '{print $1}'); JS=${JS:-0}
+      TIN=$(echo "$U" | awk '{print $2}'); TIN=${TIN:-0}
+      JOK=$(echo "$U" | awk '{print $3}'); JOK=${JOK:-0}
+      JFL=$(echo "$U" | awk '{print $4}'); JFL=${JFL:-0}
+      JCB=$(echo "$U" | awk '{print $5}'); JCB=${JCB:-0}
+      log "today: jobs_started=$JS tokens_in=$TIN succeeded=$JOK failed=$JFL circuit_broken=$JCB"
+      [ "$JS" -le 200 ] || fail "jobs_started today $JS > 200 (soft cap)"
+      [ "$TIN" -le 30000000 ] || fail "tokens_in today $TIN > 30M (budget cliff)"
+      # "still firing despite breaker": more started than completed by >5
+      DELTA=$((JS - JOK - JFL - JCB))
+      if [ "$JCB" -gt 0 ] && [ "$DELTA" -gt 5 ]; then
+        fail "circuit broke but still firing (started=$JS, completed_or_broken=$((JOK+JFL+JCB)), delta=$DELTA)"
+      fi
+    fi
+
+    # Act
+    if [ "$STOP" = "1" ]; then
+      log "STOPPING synapbus: $STOP_REASON"
+      kubectl -n $NS scale deploy/$DEPLOY --replicas=0
+      log "synapbus scaled to 0 replicas. Re-enable with: kubectl -n $NS scale deploy/$DEPLOY --replicas=1"
+      exit 2
+    fi
+    log "HEALTHY — no action"
+    exit 0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: synapbus-watchdog
+  namespace: synapbus
+spec:
+  schedule: "5 * * * *"            # every hour at :05 past (UTC)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 6
+  failedJobsHistoryLimit: 6
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          serviceAccountName: synapbus-watchdog
+          restartPolicy: Never
+          containers:
+            - name: watchdog
+              image: docker.io/library/synapbus-watchdog:v1
+              imagePullPolicy: Never
+              command: ["/bin/bash", "/scripts/watchdog.sh"]
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: script
+              configMap:
+                name: synapbus-watchdog-script
+                defaultMode: 0755

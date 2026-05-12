@@ -29,13 +29,13 @@ import (
 
 // MCPServer wraps the mcp-go server with SynapBus services.
 type MCPServer struct {
-	mcpServer        *server.MCPServer
-	httpServer       *server.StreamableHTTPServer
-	connMgr          *ConnectionManager
-	agentService     *agents.AgentService
-	hybridRegistrar  *HybridToolRegistrar
-	logger           *slog.Logger
-	console          *console.Printer
+	mcpServer       *server.MCPServer
+	httpServer      *server.StreamableHTTPServer
+	connMgr         *ConnectionManager
+	agentService    *agents.AgentService
+	hybridRegistrar *HybridToolRegistrar
+	logger          *slog.Logger
+	console         *console.Printer
 }
 
 // NewMCPServer creates and configures a new MCP server with 5 hybrid tools registered.
@@ -180,13 +180,25 @@ func NewMCPServer(
 	// Create Streamable HTTP transport with context func for auth propagation
 	httpServer := server.NewStreamableHTTPServer(mcpSrv,
 		server.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			// Propagate agent identity from HTTP auth to MCP context
+			// Propagate agent identity from HTTP auth to MCP context.
+			// The full *agents.Agent is needed by injection middleware
+			// (which uses owner_id to scope retrieval); the bare name is
+			// kept for backward-compat with existing handlers that call
+			// AgentNameFromContext directly.
 			if agent, ok := agents.AgentFromContext(r.Context()); ok {
+				ctx = agents.ContextWithAgent(ctx, agent)
 				ctx = ContextWithAgentName(ctx, agent.Name)
 				// Propagate owner ID for trace recording
 				if ownerID, ok := trace.OwnerIDFromContext(r.Context()); ok {
 					ctx = trace.ContextWithOwnerID(ctx, ownerID)
 				}
+			}
+			// Dispatch-token bridge for feature 020 dream consolidation:
+			// the runner sends X-Synapbus-Dispatch-Token on every MCP
+			// request via the SDK's McpHttpServerConfig.headers field;
+			// the memory_* tools read this from request context.
+			if tok := r.Header.Get("X-Synapbus-Dispatch-Token"); tok != "" {
+				ctx = WithDispatchToken(ctx, tok)
 			}
 			return ctx
 		}),
@@ -206,9 +218,45 @@ func NewMCPServer(
 	return s
 }
 
+// SetInjection wires the proactive-memory injection middleware
+// (feature 020) into the hybrid tool registrar and re-registers the
+// hybrid tools so the wrappers take effect. Must be called after
+// NewMCPServer and before the server starts handling traffic.
+//
+// `coreProvider` is consulted only on session-start tools (currently
+// `my_status`). Pass nil when US2 has not yet been wired.
+func (s *MCPServer) SetInjection(cfg messaging.MemoryConfig, store *messaging.MemoryInjections, coreProvider search.CoreMemoryProvider) {
+	if s.hybridRegistrar == nil || s.mcpServer == nil {
+		return
+	}
+	s.hybridRegistrar.SetInjection(cfg, store, coreProvider)
+	// Re-register the hybrid tools so the new InjectionEnabled / Core
+	// wiring takes effect. AddTool overwrites by name (see mcp-go's
+	// `MCPServer.AddTools`), so this swaps in the wrapped handlers
+	// without leaking the original registrations.
+	s.hybridRegistrar.RegisterAllOnServer(s.mcpServer)
+}
+
+// SetDream wires the six memory_* MCP tools (feature 020 — US3).
+// Only registers when cfg.DreamEnabled is true; otherwise this is a
+// no-op so the tool surface remains identical to the pre-feature
+// shape. Must be called before the server starts serving traffic.
+func (s *MCPServer) SetDream(deps MemoryToolDeps) {
+	if s == nil || s.mcpServer == nil {
+		return
+	}
+	if !deps.MemConfig.DreamEnabled {
+		s.logger.Info("dream tools not registered (SYNAPBUS_DREAM_ENABLED=0)")
+		return
+	}
+	reg := NewMemoryToolRegistrar(deps)
+	reg.RegisterAllOnServer(s.mcpServer)
+}
+
 // WireGoalsTools registers the spec-018 tool surface (create_goal,
-// propose_task_tree, propose_agent, claim_task, request_resource,
-// list_resources) on the MCP server. Must be called after NewMCPServer.
+// propose_task_tree, claim_task, request_resource, list_resources,
+// complete_goal) on the MCP server. Must be called after NewMCPServer.
+// Note: propose_agent was removed in the internal-only mode change.
 func (s *MCPServer) WireGoalsTools(r *GoalsToolRegistrar) {
 	if r == nil || s.mcpServer == nil {
 		return

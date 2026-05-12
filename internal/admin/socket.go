@@ -226,6 +226,16 @@ func (s *AdminServer) dispatch(req Request) Response {
 	case "harness.config_set":
 		return s.handleHarnessConfigSet(ctx, req.Args)
 
+	// --- memory core (feature 020 — proactive memory) ---
+	case "memory.core.get":
+		return s.handleMemoryCoreGet(ctx, req.Args)
+	case "memory.core.set":
+		return s.handleMemoryCoreSet(ctx, req.Args)
+	case "memory.core.delete":
+		return s.handleMemoryCoreDelete(ctx, req.Args)
+	case "memory.dream_run":
+		return s.handleMemoryDreamRun(ctx, req.Args)
+
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Command)}
 	}
@@ -545,7 +555,7 @@ func (s *AdminServer) handleAuditStats(ctx context.Context) Response {
 	}
 
 	return Response{OK: true, Data: map[string]interface{}{
-		"total_traces":    totalTraces,
+		"total_traces":     totalTraces,
 		"counts_by_action": counts,
 	}}
 }
@@ -1694,7 +1704,7 @@ func (s *AdminServer) handleAttachmentsGC(ctx context.Context) Response {
 	}
 
 	return Response{OK: true, Data: map[string]interface{}{
-		"files_removed":  result.FilesRemoved,
+		"files_removed":   result.FilesRemoved,
 		"bytes_reclaimed": result.BytesReclaimed,
 	}}
 }
@@ -1848,6 +1858,179 @@ func (s *AdminServer) handleHarnessConfigSet(ctx context.Context, args json.RawM
 		"local_command":       agent.LocalCommand,
 		"harness_config_json": agent.HarnessConfigJSON,
 	}}
+}
+
+// ---------- memory core handlers (feature 020) ----------
+//
+// owner_id wire format: callers pass the owner as a username; we resolve
+// to `users.id` and pass the string form to CoreMemoryStore so it matches
+// the proactive-memory tables' TEXT owner_id convention.
+
+func (s *AdminServer) resolveOwnerString(ctx context.Context, ownerInput string) (string, error) {
+	if ownerInput == "" {
+		return "", fmt.Errorf("owner is required")
+	}
+	// First try numeric — admins may already know the user ID.
+	var id int64
+	if _, err := fmt.Sscanf(ownerInput, "%d", &id); err == nil && id > 0 {
+		return fmt.Sprintf("%d", id), nil
+	}
+	// Otherwise treat as username.
+	user, err := s.services.Users.GetUserByUsername(ctx, ownerInput)
+	if err != nil {
+		return "", fmt.Errorf("resolve owner %q: %w", ownerInput, err)
+	}
+	return fmt.Sprintf("%d", user.ID), nil
+}
+
+func (s *AdminServer) handleMemoryCoreGet(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Owner string `json:"owner"`
+		Agent string `json:"agent"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.Agent == "" {
+		return Response{OK: false, Error: "agent is required"}
+	}
+	if s.services.CoreMemoryStore == nil {
+		return Response{OK: false, Error: "core memory store not configured"}
+	}
+	ownerStr, err := s.resolveOwnerString(ctx, p.Owner)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	blob, updatedAt, ok, err := s.services.CoreMemoryStore.Get(ctx, ownerStr, p.Agent)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	if !ok {
+		return Response{OK: true, Data: map[string]any{
+			"owner_id":   ownerStr,
+			"agent_name": p.Agent,
+			"exists":     false,
+		}}
+	}
+	return Response{OK: true, Data: map[string]any{
+		"owner_id":   ownerStr,
+		"agent_name": p.Agent,
+		"exists":     true,
+		"blob":       blob,
+		"updated_at": updatedAt.Format(time.RFC3339),
+	}}
+}
+
+func (s *AdminServer) handleMemoryCoreSet(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Owner     string `json:"owner"`
+		Agent     string `json:"agent"`
+		Blob      string `json:"blob"`
+		UpdatedBy string `json:"updated_by"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.Agent == "" {
+		return Response{OK: false, Error: "agent is required"}
+	}
+	if s.services.CoreMemoryStore == nil {
+		return Response{OK: false, Error: "core memory store not configured"}
+	}
+	ownerStr, err := s.resolveOwnerString(ctx, p.Owner)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	updatedBy := p.UpdatedBy
+	if updatedBy == "" {
+		updatedBy = "human"
+	}
+	if err := s.services.CoreMemoryStore.Set(ctx, ownerStr, p.Agent, p.Blob, updatedBy); err != nil {
+		if err == messaging.ErrCoreMemoryTooLarge {
+			return Response{OK: false, Error: fmt.Sprintf("core_memory_too_large: blob exceeds %d bytes", s.services.CoreMemoryStore.MaxBytes())}
+		}
+		return Response{OK: false, Error: err.Error()}
+	}
+	return Response{OK: true, Data: map[string]any{
+		"owner_id":   ownerStr,
+		"agent_name": p.Agent,
+		"blob_chars": len(p.Blob),
+		"updated_by": updatedBy,
+	}}
+}
+
+func (s *AdminServer) handleMemoryCoreDelete(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Owner string `json:"owner"`
+		Agent string `json:"agent"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.Agent == "" {
+		return Response{OK: false, Error: "agent is required"}
+	}
+	if s.services.CoreMemoryStore == nil {
+		return Response{OK: false, Error: "core memory store not configured"}
+	}
+	ownerStr, err := s.resolveOwnerString(ctx, p.Owner)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	if err := s.services.CoreMemoryStore.Delete(ctx, ownerStr, p.Agent); err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	return Response{OK: true, Data: map[string]any{
+		"owner_id":   ownerStr,
+		"agent_name": p.Agent,
+		"deleted":    true,
+	}}
+}
+
+// handleMemoryDreamRun forces dream-job dispatch(es). With parallel=1
+// (default) returns one job_id. With parallel>1, fans out N concurrent
+// jobs across slots 0..N-1 and returns the list of created ids. The
+// circuit breaker still applies.
+func (s *AdminServer) handleMemoryDreamRun(ctx context.Context, args json.RawMessage) Response {
+	var p struct {
+		Owner    string `json:"owner"`
+		JobType  string `json:"job_type"`
+		Parallel int    `json:"parallel"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return Response{OK: false, Error: "invalid args: " + err.Error()}
+	}
+	if p.JobType == "" {
+		return Response{OK: false, Error: "job_type is required"}
+	}
+	if s.services.DreamRunN == nil {
+		return Response{OK: false, Error: "dream worker not configured (SYNAPBUS_DREAM_ENABLED=0?)"}
+	}
+	ownerStr, err := s.resolveOwnerString(ctx, p.Owner)
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	parallel := p.Parallel
+	if parallel <= 0 {
+		parallel = s.services.DefaultDreamParallel
+	}
+	if parallel <= 0 {
+		parallel = 1
+	}
+	ids, err := s.services.DreamRunN(ctx, ownerStr, p.JobType, parallel)
+	if err != nil && len(ids) == 0 {
+		return Response{OK: false, Error: err.Error()}
+	}
+	out := map[string]any{
+		"job_ids":  ids,
+		"owner_id": ownerStr,
+		"job_type": p.JobType,
+		"parallel": parallel,
+	}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	return Response{OK: true, Data: out}
 }
 
 // Ensure the messaging import is used.

@@ -44,6 +44,26 @@ type HybridToolRegistrar struct {
 	db                *sql.DB
 	queryExecutor     *agentquery.Executor
 	logger            *slog.Logger
+
+	// Injection (feature 020). When injectionCfg.Cfg.InjectionEnabled
+	// is false (the default), WrapInjection returns handlers unchanged
+	// so existing tool response shapes are preserved bit-for-bit.
+	injectionCfg     messaging.MemoryConfig
+	memoryInjections *messaging.MemoryInjections
+	coreProvider     search.CoreMemoryProvider
+}
+
+// SetInjection wires the proactive-memory injection middleware into
+// every eligible MCP tool registered by RegisterAllOnServer. Call this
+// after NewHybridToolRegistrar and before RegisterAllOnServer.
+//
+// `coreProvider` is consulted only on session-start tools (currently
+// `my_status`). May be nil when US2 has not yet been wired — the
+// wrapper simply skips the core-memory hook in that case.
+func (h *HybridToolRegistrar) SetInjection(cfg messaging.MemoryConfig, store *messaging.MemoryInjections, coreProvider search.CoreMemoryProvider) {
+	h.injectionCfg = cfg
+	h.memoryInjections = store
+	h.coreProvider = coreProvider
 }
 
 // SetMarketplaceService attaches the marketplace service for the 5 new
@@ -93,14 +113,104 @@ func NewHybridToolRegistrar(
 }
 
 // RegisterAllOnServer registers all hybrid tools on an mcp-go MCPServer.
+//
+// When proactive-memory injection is enabled (via SetInjection), the
+// eligible tool handlers are wrapped with WrapInjection so their JSON
+// responses gain a `relevant_context` field per
+// `contracts/mcp-injection.md`. Tools NOT in the eligible set
+// (currently `get_replies`) are registered unchanged.
 func (h *HybridToolRegistrar) RegisterAllOnServer(s *server.MCPServer) {
-	s.AddTool(h.myStatusTool(), h.handleMyStatus)
-	s.AddTool(h.sendMessageTool(), h.handleSendMessage)
-	s.AddTool(h.searchTool(), h.handleSearch)
-	s.AddTool(h.executeTool(), h.handleExecute)
+	s.AddTool(h.myStatusTool(), h.wrap("my_status", h.handleMyStatus, true))
+	s.AddTool(h.sendMessageTool(), h.wrap("send_message", h.handleSendMessage, false))
+	s.AddTool(h.searchTool(), h.wrap("search", h.handleSearch, false))
+	s.AddTool(h.executeTool(), h.wrap("execute", h.handleExecute, false))
 	s.AddTool(h.getRepliesTool(), h.handleGetReplies)
 
-	h.logger.Info("hybrid MCP tools registered", "count", 5)
+	h.logger.Info("hybrid MCP tools registered",
+		"count", 5,
+		"injection_enabled", h.injectionCfg.InjectionEnabled,
+	)
+}
+
+// wrap applies the proactive-memory WrapInjection middleware to one
+// tool handler. When InjectionEnabled is false (default), wrap returns
+// the original handler unchanged. `includeCore` is true only for
+// session-start tools (my_status today).
+func (h *HybridToolRegistrar) wrap(toolName string, inner ToolHandler, includeCore bool) ToolHandler {
+	if !h.injectionCfg.InjectionEnabled {
+		return inner
+	}
+	cfg := WrapConfig{
+		Cfg:          h.injectionCfg,
+		SearchSvc:    h.searchService,
+		Injections:   h.memoryInjections,
+		IncludeCore:  includeCore,
+		CoreProvider: h.coreProvider,
+		QuerySource:  querySourceFor(toolName),
+		Logger:       h.logger,
+	}
+	return WrapInjection(inner, toolName, cfg)
+}
+
+// querySourceFor returns the QuerySource closure for the given tool.
+// The contract (`contracts/mcp-injection.md`) prescribes the retrieval
+// query per tool:
+//
+//   - my_status:    "<recent activity>" (fallback when nothing else)
+//   - send_message: body of the sent message
+//   - search:       the user's query argument
+//   - execute:      stringified args (best-effort)
+//
+// Tools not registered as MCP tools here (`claim_messages`,
+// `read_inbox`, `read_channel`) are exercised via the `execute` bridge
+// and inherit the `execute` query source.
+func querySourceFor(toolName string) QuerySource {
+	switch toolName {
+	case "my_status":
+		return func(_ context.Context, _ string, _ map[string]any, _ map[string]any) string {
+			// FR-009: when there's no explicit query, use recent owner
+			// activity. The retrieval layer interprets the empty string
+			// as "no query" and falls back to recency-ordered FTS.
+			return ""
+		}
+	case "send_message":
+		return func(_ context.Context, _ string, args map[string]any, _ map[string]any) string {
+			if args == nil {
+				return ""
+			}
+			if body, ok := args["body"].(string); ok {
+				return body
+			}
+			return ""
+		}
+	case "search":
+		return func(_ context.Context, _ string, args map[string]any, _ map[string]any) string {
+			if args == nil {
+				return ""
+			}
+			if q, ok := args["query"].(string); ok {
+				return q
+			}
+			return ""
+		}
+	case "execute":
+		return func(_ context.Context, _ string, args map[string]any, _ map[string]any) string {
+			if args == nil {
+				return ""
+			}
+			// Best-effort: use the `code` argument verbatim. It is the
+			// only required input and reliably reflects what the agent
+			// is about to do.
+			if code, ok := args["code"].(string); ok {
+				return code
+			}
+			return ""
+		}
+	default:
+		return func(_ context.Context, _ string, _ map[string]any, _ map[string]any) string {
+			return ""
+		}
+	}
 }
 
 // --- Tool Definitions ---
@@ -118,7 +228,7 @@ func (h *HybridToolRegistrar) sendMessageTool() mcplib.Tool {
 		mcplib.WithString("channel", mcplib.Description("Channel name or numeric ID for channel messages")),
 		mcplib.WithString("body", mcplib.Description("Message body text"), mcplib.Required()),
 		mcplib.WithString("subject", mcplib.Description("Conversation subject (optional)")),
-		mcplib.WithNumber("priority", mcplib.Description("Message priority (1-10, default 5)"), mcplib.Min(1), mcplib.Max(10)),
+		mcplib.WithNumber("priority", mcplib.Description("Message priority (1-10, default 5)")),
 		mcplib.WithString("metadata", mcplib.Description("JSON metadata object (optional)")),
 		mcplib.WithNumber("reply_to", mcplib.Description("ID of the parent message to reply to. Creates a threaded reply. Always use reply_to when responding to a message that is itself a thread reply, to keep conversations organized.")),
 		mcplib.WithString("attachments", mcplib.Description("Comma-separated list of attachment hashes to link to this message. Upload attachments first using the upload_attachment action via the execute tool.")),
