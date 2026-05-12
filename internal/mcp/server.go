@@ -193,6 +193,13 @@ func NewMCPServer(
 					ctx = trace.ContextWithOwnerID(ctx, ownerID)
 				}
 			}
+			// Dispatch-token bridge for feature 020 dream consolidation:
+			// the runner sends X-Synapbus-Dispatch-Token on every MCP
+			// request via the SDK's McpHttpServerConfig.headers field;
+			// the memory_* tools read this from request context.
+			if tok := r.Header.Get("X-Synapbus-Dispatch-Token"); tok != "" {
+				ctx = WithDispatchToken(ctx, tok)
+			}
 			return ctx
 		}),
 	)
