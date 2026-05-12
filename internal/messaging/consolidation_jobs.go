@@ -35,6 +35,11 @@ const (
 	JobStatusPartial    = "partial"
 	JobStatusFailed     = "failed"
 	JobStatusExpired    = "expired"
+	// JobStatusCircuitBroken is recorded when the ConsolidatorWorker
+	// declines to dispatch because the per-(owner, day) usage gate
+	// fired. The job row is created so the audit log shows the
+	// attempt, then Complete()d immediately with this status.
+	JobStatusCircuitBroken = "circuit_broken"
 )
 
 // ErrJobAlreadyInFlight is returned by JobsStore.Create when the
@@ -207,7 +212,7 @@ func (s *JobsStore) Complete(ctx context.Context, jobID int64, status, summary, 
 		return fmt.Errorf("jobs store: nil store")
 	}
 	switch status {
-	case JobStatusSucceeded, JobStatusPartial, JobStatusFailed, JobStatusExpired:
+	case JobStatusSucceeded, JobStatusPartial, JobStatusFailed, JobStatusExpired, JobStatusCircuitBroken:
 		// ok
 	default:
 		return fmt.Errorf("jobs store: invalid completion status %q", status)

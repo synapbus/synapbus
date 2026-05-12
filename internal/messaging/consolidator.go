@@ -65,8 +65,10 @@ type HarnessExecRequest struct {
 // HarnessExecResult mirrors the fields the worker reads from
 // harness.ExecResult.
 type HarnessExecResult struct {
-	ExitCode int
-	Logs     string
+	ExitCode  int
+	Logs      string
+	TokensIn  int64
+	TokensOut int64
 }
 
 // AgentLookup resolves an agent record by name. Implemented by
@@ -90,6 +92,11 @@ type ConsolidatorWorker struct {
 	agentLook AgentLookup
 	cfg       MemoryConfig
 	logger    *slog.Logger
+
+	// usage + gate provide the per-(owner, day) circuit breaker.
+	// Optional: nil → all dispatches allowed. Wired by SetUsageGate.
+	usage *DreamUsageStore
+	gate  *UsageGate
 
 	// Optional owner enumerator. Defaults to a query over `agents`.
 	ownerLister OwnerLister
@@ -144,6 +151,16 @@ func (w *ConsolidatorWorker) SetInjectionCleanup(store *MemoryInjections) {
 // tests).
 func (w *ConsolidatorWorker) SetOwnerLister(fn OwnerLister) {
 	w.ownerLister = fn
+}
+
+// SetUsageGate wires the per-(owner, day) circuit breaker. When set,
+// the worker calls gate.Allow() before each dispatch and records a
+// `circuit_broken` job + skips Execute when the gate denies. Token
+// usage from successful runs is fed back into store so the next gate
+// evaluation reflects today's spend. Pass (nil, nil) to disable.
+func (w *ConsolidatorWorker) SetUsageGate(store *DreamUsageStore, gate *UsageGate) {
+	w.usage = store
+	w.gate = gate
 }
 
 // Start launches the ticker goroutine.
@@ -224,8 +241,22 @@ func (w *ConsolidatorWorker) tick(ctx context.Context, lastDeepPass, lastHourlyC
 			w.tryDispatch(ctx, owner, JobTypeDedupContradiction, fmt.Sprintf("watermark:%d", count))
 		}
 		// Daily deep pass: sleep_time_rewrite (mapped to core_rewrite).
+		// Skip when no agent owned by `owner` has produced any message
+		// in the configured recent-window — there's nothing to refresh
+		// the core blob from.
 		if deepPassDue {
-			w.tryDispatch(ctx, owner, JobTypeCoreRewrite, "cron:nightly")
+			window := w.cfg.DreamRecentWindow
+			if window <= 0 {
+				window = 14 * 24 * time.Hour
+			}
+			since := time.Now().UTC().Add(-window)
+			if ownerActiveSince(ctx, w.db, owner, since) {
+				w.tryDispatch(ctx, owner, JobTypeCoreRewrite, "cron:nightly")
+			} else {
+				w.logger.Debug("core_rewrite skipped — owner has no recent activity",
+					"owner_id", owner, "since", since,
+				)
+			}
 		}
 	}
 	if deepPassDue {
@@ -300,6 +331,17 @@ func (w *ConsolidatorWorker) unprocessedCount(ctx context.Context, ownerID strin
 	if lastFinished.Valid {
 		since = lastFinished.Time
 	}
+	// Cap "since" at the configured 14d (default) recency window so we
+	// never sweep historical pool — the worker only consolidates
+	// recent activity per the T3 contract.
+	window := w.cfg.DreamRecentWindow
+	if window <= 0 {
+		window = 14 * 24 * time.Hour
+	}
+	windowStart := time.Now().UTC().Add(-window)
+	if since.Before(windowStart) {
+		since = windowStart
+	}
 	args = append(args, ownerID, since)
 	q := `SELECT COUNT(*)
 	        FROM messages m JOIN agents a ON m.from_agent = a.name
@@ -318,7 +360,27 @@ func (w *ConsolidatorWorker) unprocessedCount(ctx context.Context, ownerID strin
 // for (ownerID, jobType) immediately. Used by the admin CLI
 // `synapbus memory dream-run` command. Returns the created job_id (or
 // the existing in-flight one).
+//
+// The circuit breaker still applies — admins who want to override
+// must clear today's usage row directly. Manual override on top of a
+// blown budget defeats the safety net.
 func (w *ConsolidatorWorker) ForceRun(ctx context.Context, ownerID, jobType string) (int64, error) {
+	if w.gate != nil {
+		allowed, reason, _ := w.gate.Allow(ctx, ownerID)
+		if !allowed {
+			jobID, cerr := w.jobs.Create(ctx, ownerID, jobType, "circuit_broken:"+reason)
+			if cerr == nil {
+				_ = w.jobs.Complete(ctx, jobID, JobStatusCircuitBroken, "circuit_broken: "+reason, "")
+				if w.usage != nil {
+					_ = w.usage.RecordCompletion(ctx, ownerID, 0, 0, JobStatusCircuitBroken)
+				}
+				recordCircuitBrokenMetric(ownerID, jobType, reason)
+				recordJobMetric(ownerID, jobType, JobStatusCircuitBroken)
+				return jobID, fmt.Errorf("circuit broken: %s", reason)
+			}
+			return 0, fmt.Errorf("circuit broken: %s", reason)
+		}
+	}
 	jobID, err := w.jobs.Create(ctx, ownerID, jobType, "manual:"+ownerID)
 	if err != nil {
 		if errors.Is(err, ErrJobAlreadyInFlight) {
@@ -327,6 +389,9 @@ func (w *ConsolidatorWorker) ForceRun(ctx context.Context, ownerID, jobType stri
 			}
 		}
 		return 0, err
+	}
+	if w.usage != nil {
+		_ = w.usage.RecordStart(ctx, ownerID)
 	}
 	tok, _, err := w.tokens.Issue(ctx, ownerID, jobID)
 	if err != nil {
@@ -360,6 +425,42 @@ func (w *ConsolidatorWorker) ForceRun(ctx context.Context, ownerID, jobType stri
 // tryDispatch attempts to create+dispatch one job. Idempotent —
 // ErrJobAlreadyInFlight is logged at debug and skipped.
 func (w *ConsolidatorWorker) tryDispatch(ctx context.Context, ownerID, jobType, trigger string) {
+	// Circuit breaker: skip when today's per-(owner) usage exceeds any
+	// configured limit. We still create+complete a job row so the
+	// audit log records the attempt; this also makes the
+	// circuit_broken_total metric easy to chart.
+	if w.gate != nil {
+		allowed, reason, gerr := w.gate.Allow(ctx, ownerID)
+		if gerr != nil {
+			w.logger.Warn("usage gate check failed; failing open",
+				"owner_id", ownerID, "job_type", jobType, "error", gerr,
+			)
+		} else if !allowed {
+			w.logger.Warn("dream dispatch circuit broken",
+				"owner_id", ownerID, "job_type", jobType, "reason", reason,
+			)
+			jobID, cerr := w.jobs.Create(ctx, ownerID, jobType, "circuit_broken:"+reason)
+			if cerr != nil {
+				if !errors.Is(cerr, ErrJobAlreadyInFlight) {
+					w.logger.Warn("circuit-broken job create failed",
+						"owner_id", ownerID, "job_type", jobType, "error", cerr,
+					)
+				}
+				if w.usage != nil {
+					_ = w.usage.RecordCompletion(ctx, ownerID, 0, 0, JobStatusCircuitBroken)
+				}
+				recordCircuitBrokenMetric(ownerID, jobType, reason)
+				return
+			}
+			_ = w.jobs.Complete(ctx, jobID, JobStatusCircuitBroken, "circuit_broken: "+reason, "")
+			if w.usage != nil {
+				_ = w.usage.RecordCompletion(ctx, ownerID, 0, 0, JobStatusCircuitBroken)
+			}
+			recordCircuitBrokenMetric(ownerID, jobType, reason)
+			recordJobMetric(ownerID, jobType, JobStatusCircuitBroken)
+			return
+		}
+	}
 	jobID, err := w.jobs.Create(ctx, ownerID, jobType, trigger)
 	if err != nil {
 		if errors.Is(err, ErrJobAlreadyInFlight) {
@@ -372,6 +473,9 @@ func (w *ConsolidatorWorker) tryDispatch(ctx context.Context, ownerID, jobType, 
 			"owner_id", ownerID, "job_type", jobType, "error", err,
 		)
 		return
+	}
+	if w.usage != nil {
+		_ = w.usage.RecordStart(ctx, ownerID)
 	}
 	tok, _, err := w.tokens.Issue(ctx, ownerID, jobID)
 	if err != nil {
@@ -453,17 +557,79 @@ func (w *ConsolidatorWorker) runJob(ownerID string, jobID int64, jobType, tok, r
 		"run_id", runID,
 	)
 
+	start := time.Now()
 	res, err := w.harness.Execute(ctx, agent, req)
 	status, summary, errMsg := mapHarnessResult(res, err, ctx.Err())
+	duration := time.Since(start)
 
 	if err := w.jobs.Complete(context.Background(), jobID, status, summary, errMsg); err != nil {
 		w.logger.Warn("complete job failed", "job_id", jobID, "error", err)
 	}
 	// Token revoke is best-effort.
 	_ = w.tokens.Revoke(context.Background(), tok)
+
+	// Per-(owner, day) usage accounting (T4): feed back tokens for the
+	// circuit breaker. Failure here is non-fatal.
+	if w.usage != nil {
+		var tIn, tOut int64
+		if res != nil {
+			tIn, tOut = res.TokensIn, res.TokensOut
+		}
+		_ = w.usage.RecordCompletion(context.Background(), ownerID, tIn, tOut, status)
+	}
+
+	recordJobMetric(ownerID, jobType, status)
+	recordJobDurationMetric(ownerID, jobType, duration)
+	if res != nil {
+		recordTokensMetric(ownerID, res.TokensIn, res.TokensOut)
+	}
+
 	w.logger.Info("dream job completed",
 		"job_id", jobID, "status", status, "summary", summary,
+		"duration", duration.String(),
 	)
+}
+
+// ownerActiveSince returns true when any agent owned by ownerID has
+// authored at least one message after `since`. Used by core_rewrite
+// dispatch to short-circuit when an owner's fleet has been quiet — the
+// nightly deep pass has nothing to refresh against and would waste
+// tokens.
+func ownerActiveSince(ctx context.Context, db *sql.DB, ownerID string, since time.Time) bool {
+	if db == nil || ownerID == "" {
+		return false
+	}
+	var one int
+	err := db.QueryRowContext(ctx,
+		`SELECT 1
+		   FROM messages m JOIN agents a ON m.from_agent = a.name
+		  WHERE CAST(a.owner_id AS TEXT) = ?
+		    AND m.created_at > ?
+		  LIMIT 1`,
+		ownerID, since.UTC(),
+	).Scan(&one)
+	return err == nil && one == 1
+}
+
+// agentActiveSince returns true when the named agent (owned by
+// ownerID) has authored at least one message after `since`. Reserved
+// for future per-agent gating; currently the dispatcher uses
+// ownerActiveSince above to gate the whole core_rewrite pass.
+func agentActiveSince(ctx context.Context, db *sql.DB, ownerID, agentName string, since time.Time) bool {
+	if db == nil || ownerID == "" || agentName == "" {
+		return false
+	}
+	var one int
+	err := db.QueryRowContext(ctx,
+		`SELECT 1
+		   FROM messages m JOIN agents a ON m.from_agent = a.name
+		  WHERE CAST(a.owner_id AS TEXT) = ?
+		    AND a.name = ?
+		    AND m.created_at > ?
+		  LIMIT 1`,
+		ownerID, agentName, since.UTC(),
+	).Scan(&one)
+	return err == nil && one == 1
 }
 
 // mapHarnessResult translates harness output to a job status. Context

@@ -1,0 +1,19 @@
+[project]
+name = "synapbus-dream-agent"
+version = "0.1.0"
+description = "SynapBus memory-consolidation dream-agent runner (claude-agent-sdk)"
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk==0.1.48",
+    "httpx>=0.27",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = []

@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/synapbus/synapbus/internal/agents"
 	"github.com/synapbus/synapbus/internal/messaging"
+	"github.com/synapbus/synapbus/internal/metrics"
 	"github.com/synapbus/synapbus/internal/search"
 )
 
@@ -104,6 +106,7 @@ func WrapInjection(inner ToolHandler, toolName string, cfg WrapConfig) ToolHandl
 		agent, ok := callerAgent(ctx)
 		if !ok || agent == nil {
 			// No identity → no owner scope → no injection.
+			metrics.InjectionSkippedTotal.WithLabelValues(toolName, "no_owner").Inc()
 			return res, nil
 		}
 
@@ -115,12 +118,17 @@ func WrapInjection(inner ToolHandler, toolName string, cfg WrapConfig) ToolHandl
 			query = cfg.QuerySource(ctx, toolName, argsMap, body)
 		}
 
+		windowDays := int(cfg.Cfg.DreamRecentWindow / (24 * time.Hour))
+		if windowDays < 1 {
+			windowDays = 14
+		}
 		opts := search.InjectionOpts{
-			BudgetTokens: cfg.Cfg.InjectionBudgetTokens,
-			MaxItems:     cfg.Cfg.InjectionMaxItems,
-			MinScore:     cfg.Cfg.InjectionMinScore,
-			IncludeCore:  cfg.IncludeCore,
-			CoreProvider: cfg.CoreProvider,
+			BudgetTokens:     cfg.Cfg.InjectionBudgetTokens,
+			MaxItems:         cfg.Cfg.InjectionMaxItems,
+			MinScore:         cfg.Cfg.InjectionMinScore,
+			IncludeCore:      cfg.IncludeCore,
+			CoreProvider:     cfg.CoreProvider,
+			RecentWindowDays: windowDays,
 		}
 		pkt, err := search.BuildContextPacket(ctx, cfg.SearchSvc, agent, query, opts)
 		if err != nil {
@@ -129,11 +137,20 @@ func WrapInjection(inner ToolHandler, toolName string, cfg WrapConfig) ToolHandl
 		}
 		if pkt == nil {
 			// Empty packet → omit `relevant_context` entirely.
+			metrics.InjectionSkippedTotal.WithLabelValues(toolName, "empty_pool").Inc()
 			return res, nil
 		}
 		if len(pkt.Memories) == 0 && pkt.CoreMemory == "" {
+			metrics.InjectionSkippedTotal.WithLabelValues(toolName, "empty_pool").Inc()
 			return res, nil
 		}
+
+		// Packet metrics — count, size, item-count. Done before re-marshal
+		// so a marshal failure still gets a packet-created observation
+		// (which is what we'd be alerting on anyway).
+		metrics.InjectionPacketsTotal.WithLabelValues(toolName).Inc()
+		metrics.InjectionMemoriesPerPacket.WithLabelValues(toolName).Observe(float64(len(pkt.Memories)))
+		metrics.InjectionPacketChars.WithLabelValues(toolName).Observe(float64(pkt.PacketChars))
 
 		body["relevant_context"] = pkt
 

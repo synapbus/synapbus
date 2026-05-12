@@ -56,6 +56,31 @@ type MemoryConfig struct {
 	// DreamAgent is the name of the agent invoked as the dream worker
 	// via harness.Harness.Execute.
 	DreamAgent string
+
+	// DreamRecentWindow bounds the lookback for the dream worker's
+	// per-owner input set (unprocessed-count queries, recency
+	// injection fallback, and memory_list_unprocessed). Messages older
+	// than `now - DreamRecentWindow` are invisible to the worker — the
+	// pool is effectively a rolling window of recent activity. Default
+	// 14 days. Env: SYNAPBUS_DREAM_RECENT_WINDOW. Accepts Go
+	// duration syntax plus the "Nd" days extension.
+	DreamRecentWindow time.Duration
+
+	// DreamDailyTokenLimitIn is the per-(owner, day) input-token
+	// circuit-breaker threshold. When the running sum of TokensIn
+	// across today's dream jobs exceeds this, the worker skips further
+	// dispatches for that owner until the date rolls over. Default 1M.
+	// Env: SYNAPBUS_DREAM_DAILY_TOKEN_LIMIT_IN.
+	DreamDailyTokenLimitIn int64
+
+	// DreamDailyTokenLimitOut is the per-(owner, day) output-token
+	// circuit-breaker threshold. Default 200k.
+	// Env: SYNAPBUS_DREAM_DAILY_TOKEN_LIMIT_OUT.
+	DreamDailyTokenLimitOut int64
+
+	// DreamDailyJobLimit is the per-(owner, day) ceiling on jobs
+	// started. Default 100. Env: SYNAPBUS_DREAM_DAILY_JOB_LIMIT.
+	DreamDailyJobLimit int
 }
 
 // DefaultMemoryConfig returns the defaults exactly as listed in the
@@ -74,6 +99,11 @@ func DefaultMemoryConfig() MemoryConfig {
 		DreamWallclockBudget:  10 * time.Minute,
 		DreamWatermark:        20,
 		DreamAgent:            "claude-code",
+		// 14 days of recent activity.
+		DreamRecentWindow:       336 * time.Hour,
+		DreamDailyTokenLimitIn:  1_000_000,
+		DreamDailyTokenLimitOut: 200_000,
+		DreamDailyJobLimit:      100,
 	}
 }
 
@@ -138,6 +168,26 @@ func ParseMemoryConfig() MemoryConfig {
 	}
 	if v := os.Getenv("SYNAPBUS_DREAM_AGENT"); v != "" {
 		cfg.DreamAgent = v
+	}
+	if v := os.Getenv("SYNAPBUS_DREAM_RECENT_WINDOW"); v != "" {
+		if d, err := parseDurationWithDays(v); err == nil && d > 0 {
+			cfg.DreamRecentWindow = d
+		}
+	}
+	if v := os.Getenv("SYNAPBUS_DREAM_DAILY_TOKEN_LIMIT_IN"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			cfg.DreamDailyTokenLimitIn = n
+		}
+	}
+	if v := os.Getenv("SYNAPBUS_DREAM_DAILY_TOKEN_LIMIT_OUT"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			cfg.DreamDailyTokenLimitOut = n
+		}
+	}
+	if v := os.Getenv("SYNAPBUS_DREAM_DAILY_JOB_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.DreamDailyJobLimit = n
+		}
 	}
 
 	return cfg

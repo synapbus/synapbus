@@ -84,4 +84,81 @@ var (
 		},
 		[]string{"agent"},
 	)
+
+	// Dream worker metrics (feature 020 follow-up).
+	DreamJobsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "synapbus",
+			Name:      "dream_jobs_total",
+			Help:      "Dream worker jobs dispatched, labeled by owner, job_type and final status",
+		},
+		[]string{"owner", "job_type", "status"},
+	)
+
+	DreamTokensTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "synapbus",
+			Name:      "dream_tokens_total",
+			Help:      "Total tokens consumed by dream worker runs, labeled by owner and direction (in|out)",
+		},
+		[]string{"owner", "direction"},
+	)
+
+	DreamJobDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "synapbus",
+			Name:      "dream_job_duration_seconds",
+			Help:      "Wallclock duration of a single dream worker job",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"owner", "job_type"},
+	)
+
+	DreamCircuitBrokenTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "synapbus",
+			Name:      "dream_circuit_broken_total",
+			Help:      "Times the dream worker refused to dispatch because the daily usage gate fired",
+		},
+		[]string{"owner", "reason"},
+	)
+
+	// Proactive-injection metrics (feature 020 follow-up).
+	InjectionPacketsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "synapbus",
+			Name:      "injection_packets_total",
+			Help:      "Number of relevant_context packets attached to MCP tool responses, by tool",
+		},
+		[]string{"tool"},
+	)
+
+	InjectionMemoriesPerPacket = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "synapbus",
+			Name:      "injection_memories_per_packet",
+			Help:      "Distribution of memory items per injection packet, by tool",
+			Buckets:   []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		},
+		[]string{"tool"},
+	)
+
+	InjectionPacketChars = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "synapbus",
+			Name:      "injection_packet_chars",
+			Help:      "Distribution of character size of an injection packet, by tool",
+			Buckets:   []float64{0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500},
+		},
+		[]string{"tool"},
+	)
+
+	InjectionSkippedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "synapbus",
+			Name:      "injection_skipped_total",
+			Help:      "Times injection was skipped, labeled by tool and reason (no_owner|empty_pool|disabled)",
+		},
+		[]string{"tool", "reason"},
+	)
 )

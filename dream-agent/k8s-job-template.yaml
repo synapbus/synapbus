@@ -1,0 +1,82 @@
+# Reference Job template that the SynapBus k8sjob harness instantiates
+# per dispatched dream-agent run. The harness will:
+#   1. Clone this template
+#   2. Populate `metadata.name` with `dream-<job_id>-<run_id_short>`
+#   3. Merge req.Env into `env:` (SYNAPBUS_DISPATCH_TOKEN,
+#      SYNAPBUS_CONSOLIDATION_JOB_ID, SYNAPBUS_JOB_TYPE,
+#      SYNAPBUS_OWNER_ID, SYNAPBUS_DREAM_PROMPT, SYNAPBUS_RUN_ID)
+#   4. Tail container logs back to the worker
+#
+# Replace `kubic.home.arpa:32000/synapbus-dream-agent:v0.1.0` with the
+# actual image tag your registry publishes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dream-agent-PLACEHOLDER
+  namespace: synapbus
+  labels:
+    app: synapbus-dream-agent
+    synapbus.io/role: memory-consolidator
+spec:
+  backoffLimit: 0          # one-shot — server-side circuit breaker decides retries
+  ttlSecondsAfterFinished: 600
+  activeDeadlineSeconds: 900   # hard cap above DreamWallclockBudget (default 10m)
+  template:
+    metadata:
+      labels:
+        app: synapbus-dream-agent
+    spec:
+      restartPolicy: Never
+      serviceAccountName: default
+      containers:
+        - name: dream-agent
+          image: kubic.home.arpa:32000/synapbus-dream-agent:v0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            # In-cluster SynapBus address (cluster DNS).
+            - name: SYNAPBUS_URL
+              value: "http://synapbus.synapbus.svc.cluster.local:8080"
+            - name: SYNAPBUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dream-agent-secrets
+                  key: SYNAPBUS_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dream-agent-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: CLAUDE_CONFIG_DIR
+              value: "/home/dream/.claude"
+            # Optional OTLP/HTTP traces export to Tempo
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://tempo.observability.svc.cluster.local:4318/v1/traces"
+            # ---- The harness Env map appends here at dispatch time ----
+            # SYNAPBUS_DISPATCH_TOKEN, SYNAPBUS_CONSOLIDATION_JOB_ID,
+            # SYNAPBUS_JOB_TYPE, SYNAPBUS_OWNER_ID, SYNAPBUS_DREAM_PROMPT,
+            # SYNAPBUS_RUN_ID
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+---
+# Secret skeleton — populate via kubectl + sealed-secrets / sops out of band.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dream-agent-secrets
+  namespace: synapbus
+type: Opaque
+stringData:
+  SYNAPBUS_API_KEY: "REPLACE_ME"      # dream-claude agent's SynapBus API key
+  ANTHROPIC_API_KEY: "REPLACE_ME"     # Anthropic API key for Claude Code

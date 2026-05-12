@@ -275,7 +275,14 @@ func (r *MemoryToolRegistrar) handleListUnprocessed(ctx context.Context, req mcp
 	for _, id := range memIDs {
 		queryArgs = append(queryArgs, id)
 	}
-	queryArgs = append(queryArgs, owner, since, limit)
+	// Apply the same 14d (configurable) recency window the worker uses
+	// so the consolidation agent only ever sees a bounded input set.
+	windowDays := int(r.deps.MemConfig.DreamRecentWindow / (24 * time.Hour))
+	if windowDays < 1 {
+		windowDays = 14
+	}
+	windowExpr := fmt.Sprintf("-%d days", windowDays)
+	queryArgs = append(queryArgs, owner, since, windowExpr, limit)
 
 	q := `SELECT m.id, m.from_agent, c.name, m.body, m.created_at
 	        FROM messages m
@@ -284,6 +291,7 @@ func (r *MemoryToolRegistrar) handleListUnprocessed(ctx context.Context, req mcp
 	       WHERE m.channel_id IN (` + placeholders + `)
 	         AND CAST(a.owner_id AS TEXT) = ?
 	         AND m.id > ?
+	         AND m.created_at > datetime('now', ?)
 	       ORDER BY m.id ASC
 	       LIMIT ?`
 

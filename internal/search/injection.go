@@ -105,6 +105,11 @@ type InjectionOpts struct {
 	// did not surface through retrieval. When nil, only pins already
 	// present in the retrieval results are highlighted.
 	MessageLookup MessageLookup
+	// RecentWindowDays bounds the recency fallback (FR-009) to the
+	// last N days of memory-channel activity. 0 → 14d default.
+	// Mirrored from messaging.MemoryConfig.DreamRecentWindow by the
+	// MCP wrapper at request time.
+	RecentWindowDays int
 	// Now is overridable for tests. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -195,8 +200,13 @@ func BuildContextPacket(
 			// FR-009 recency fallback: no explicit query → return the N
 			// most recent memory-channel messages whose author belongs to
 			// the caller's owner. Bypasses the hybrid index (which has no
-			// notion of "no query") and goes directly to SQL.
-			items, err := recentMemoriesForOwner(ctx, svc.db, callerOwner, wantedLimit)
+			// notion of "no query") and goes directly to SQL. Window is
+			// bounded by opts.RecentWindowDays (defaults to 14).
+			windowDays := opts.RecentWindowDays
+			if windowDays <= 0 {
+				windowDays = 14
+			}
+			items, err := recentMemoriesForOwner(ctx, svc.db, callerOwner, wantedLimit, windowDays)
 			if err != nil {
 				return nil, fmt.Errorf("build context packet: recency: %w", err)
 			}
@@ -494,10 +504,17 @@ func applyPinOverlay(ctx context.Context, items []MemoryItem, pinIDs []int64, op
 // Recency is approximated as "ORDER BY messages.id DESC" — id is
 // monotonically increasing per SQLite INSERT and matches created_at
 // ordering on this schema.
-func recentMemoriesForOwner(ctx context.Context, db *sql.DB, ownerID string, limit int) ([]MemoryItem, error) {
+func recentMemoriesForOwner(ctx context.Context, db *sql.DB, ownerID string, limit, windowDays int) ([]MemoryItem, error) {
 	if db == nil || ownerID == "" || limit <= 0 {
 		return nil, nil
 	}
+	if windowDays <= 0 {
+		windowDays = 14
+	}
+	// SQLite datetime modifier needs the value embedded in the string,
+	// not bound, so build a literal `-N days`. windowDays is bounded
+	// (int from int(Duration/(24h))) — safe to format.
+	windowExpr := fmt.Sprintf("-%d days", windowDays)
 	const q = `
 		SELECT m.id, m.from_agent, COALESCE(c.name,''), m.body, m.created_at
 		FROM messages m
@@ -507,9 +524,10 @@ func recentMemoriesForOwner(ctx context.Context, db *sql.DB, ownerID string, lim
 		  AND m.channel_id IS NOT NULL
 		  AND c.name IN ('open-brain')
 		  AND m.body IS NOT NULL AND m.body != ''
+		  AND m.created_at > datetime('now', ?)
 		ORDER BY m.id DESC
 		LIMIT ?`
-	rows, err := db.QueryContext(ctx, q, ownerID, limit)
+	rows, err := db.QueryContext(ctx, q, ownerID, windowExpr, limit)
 	if err != nil {
 		return nil, err
 	}

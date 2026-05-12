@@ -709,6 +709,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 			&agentLookupAdapter{svc: agentService},
 			memCfg,
 		)
+		// Wire per-(owner, day) circuit breaker. The gate skips
+		// dispatch (and records a circuit_broken job) once any of
+		// SYNAPBUS_DREAM_DAILY_{TOKEN_LIMIT_IN,TOKEN_LIMIT_OUT,JOB_LIMIT}
+		// is exceeded for the owner.
+		dreamUsageStore := messaging.NewDreamUsageStore(db.DB)
+		consolidator.SetUsageGate(dreamUsageStore, messaging.NewUsageGate(memCfg, dreamUsageStore))
 		consolidator.Start()
 		slog.Info("consolidator (dream) worker started",
 			"interval", memCfg.DreamInterval.String(),
@@ -1348,6 +1354,8 @@ func (a *harnessDispatcherAdapter) Execute(
 	if res != nil {
 		out.ExitCode = res.ExitCode
 		out.Logs = res.Logs
+		out.TokensIn = res.Usage.TokensIn
+		out.TokensOut = res.Usage.TokensOut
 	}
 	return out, nil
 }
