@@ -180,6 +180,96 @@ func TestConsolidator_WallclockTerminatesRunaway(t *testing.T) {
 	}
 }
 
+// TestConsolidator_PreDispatchFailureDoesNotBurnJobsStarted verifies
+// that when launchOne fails before the Dispatch flip (e.g. agent
+// lookup fails), the per-(owner, day) jobs_started counter is NOT
+// incremented. Otherwise, repeated pre-dispatch failures inflate the
+// counter without any actual runs and eventually trip the
+// jobs_exceeded circuit breaker, wedging the worker for the rest of
+// the UTC day.
+func TestConsolidator_PreDispatchFailureDoesNotBurnJobsStarted(t *testing.T) {
+	h := &stubHarness{}
+	// Pass nil agent → stubAgentLookup.GetAgent returns "not found".
+	// launchOne will Complete the job as failed before reaching Dispatch.
+	cfg := MemoryConfig{
+		DreamEnabled:         true,
+		DreamWatermark:       1,
+		DreamMaxConcurrent:   1,
+		DreamParallel:        1,
+		DreamWallclockBudget: 100 * time.Millisecond,
+		DreamAgent:           "claude-code",
+		DreamDailyJobLimit:   2,
+	}
+	w, db := newWorkerForTest(t, h, nil, cfg)
+	usage := NewDreamUsageStore(db)
+	gate := NewUsageGate(cfg, usage)
+	w.SetUsageGate(usage, gate)
+
+	ctx := context.Background()
+	owner := "1"
+
+	// Three attempts to ForceRun. Each one fails inside launchOne at the
+	// agent-lookup step. None of them actually dispatch, so none should
+	// count against DreamDailyJobLimit.
+	for i := 0; i < 3; i++ {
+		_, _ = w.ForceRun(ctx, owner, JobTypeReflection)
+	}
+
+	u, err := usage.Today(ctx, owner)
+	if err != nil {
+		t.Fatalf("Today: %v", err)
+	}
+	if u.JobsStarted != 0 {
+		t.Errorf("jobs_started must stay 0 when no dispatch flip succeeded; got %d", u.JobsStarted)
+	}
+
+	allowed, reason, _ := gate.Allow(ctx, owner)
+	if !allowed {
+		t.Errorf("gate should still allow after pre-dispatch failures; got denied (%s)", reason)
+	}
+}
+
+// TestConsolidator_DispatchSuccessIncrementsJobsStarted is the positive
+// counterpart: when launchOne succeeds end-to-end (token issue + agent
+// lookup + dispatch flip), jobs_started IS incremented so the daily
+// limit is enforced correctly.
+func TestConsolidator_DispatchSuccessIncrementsJobsStarted(t *testing.T) {
+	h := &stubHarness{}
+	agent := DreamAgentNamed{Name: "claude-code"}
+	cfg := MemoryConfig{
+		DreamEnabled:         true,
+		DreamWatermark:       1,
+		DreamMaxConcurrent:   1,
+		DreamParallel:        1,
+		DreamWallclockBudget: 500 * time.Millisecond,
+		DreamAgent:           "claude-code",
+		DreamDailyJobLimit:   10,
+	}
+	w, db := newWorkerForTest(t, h, agent, cfg)
+	usage := NewDreamUsageStore(db)
+	gate := NewUsageGate(cfg, usage)
+	w.SetUsageGate(usage, gate)
+
+	ctx := context.Background()
+	owner := "1"
+
+	ids, err := w.ForceRun(ctx, owner, JobTypeReflection)
+	if err != nil {
+		t.Fatalf("ForceRun: %v", err)
+	}
+	if ids == 0 {
+		t.Fatalf("ForceRun returned zero job id")
+	}
+	// Wait for the async runJob goroutine to settle so the counter
+	// snapshot is stable. The stub harness returns immediately.
+	w.Stop()
+
+	u, _ := usage.Today(ctx, owner)
+	if u.JobsStarted != 1 {
+		t.Errorf("jobs_started: want 1 after a successful dispatch, got %d", u.JobsStarted)
+	}
+}
+
 // seedMemoryWithChannel creates the open-brain channel + an agent
 // owned by owner_id=1 + one message.
 func seedMemoryWithChannel(t *testing.T, db *sql.DB, agentName string, channelID int64, body string) int64 {

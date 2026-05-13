@@ -427,10 +427,13 @@ func (w *ConsolidatorWorker) ForceRunN(ctx context.Context, ownerID, jobType str
 // launchOne wires up the per-job tokens / harness dispatch for an
 // already-Created job row. Shared by ForceRunN and the worker's
 // internal tryDispatch path.
+//
+// jobs_started is only incremented after a successful Dispatch flip so
+// pre-dispatch failures (token issue, agent lookup, dispatch race) do
+// not consume daily-job-limit slots — they are surfaced through the
+// job row's status=failed and the jobs_failed counter via the caller
+// of Complete, not through the gate's jobs_started counter.
 func (w *ConsolidatorWorker) launchOne(ctx context.Context, ownerID, jobType string, jobID int64) error {
-	if w.usage != nil {
-		_ = w.usage.RecordStart(ctx, ownerID)
-	}
 	tok, _, err := w.tokens.Issue(ctx, ownerID, jobID)
 	if err != nil {
 		_ = w.jobs.Complete(ctx, jobID, JobStatusFailed, "", "token issue: "+err.Error())
@@ -445,6 +448,9 @@ func (w *ConsolidatorWorker) launchOne(ctx context.Context, ownerID, jobType str
 	if err := w.jobs.Dispatch(ctx, jobID, runID, tok); err != nil {
 		_ = w.jobs.Complete(ctx, jobID, JobStatusFailed, "", "dispatch flip: "+err.Error())
 		return fmt.Errorf("dispatch flip: %w", err)
+	}
+	if w.usage != nil {
+		_ = w.usage.RecordStart(ctx, ownerID)
 	}
 	w.wg.Add(1)
 	go func() {
@@ -512,9 +518,6 @@ func (w *ConsolidatorWorker) tryDispatch(ctx context.Context, ownerID, jobType, 
 		)
 		return
 	}
-	if w.usage != nil {
-		_ = w.usage.RecordStart(ctx, ownerID)
-	}
 	tok, _, err := w.tokens.Issue(ctx, ownerID, jobID)
 	if err != nil {
 		w.logger.Warn("issue token failed", "job_id", jobID, "error", err)
@@ -538,6 +541,12 @@ func (w *ConsolidatorWorker) tryDispatch(ctx context.Context, ownerID, jobType, 
 		w.logger.Warn("dispatch flip failed", "job_id", jobID, "error", err)
 		_ = w.jobs.Complete(ctx, jobID, JobStatusFailed, "", "dispatch flip: "+err.Error())
 		return
+	}
+	// Only count jobs_started after a successful Dispatch flip so
+	// pre-dispatch failures (token issue, agent lookup, race) don't
+	// burn daily-job-limit slots without actually running anything.
+	if w.usage != nil {
+		_ = w.usage.RecordStart(ctx, ownerID)
 	}
 
 	w.wg.Add(1)
