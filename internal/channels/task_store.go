@@ -264,21 +264,63 @@ func (s *SQLiteTaskStore) UpdateBidStatus(ctx context.Context, bidID int64, stat
 	return nil
 }
 
+// expireTasksBatchSize bounds how many tasks a single UPDATE statement
+// rewrites. A small batch keeps the SQLite write transaction short, so
+// the expiry worker doesn't starve under WAL contention with concurrent
+// writers (e.g. message inserts, consolidator) and respects the worker's
+// context deadline even if the eligible set is large.
+const expireTasksBatchSize = 500
+
 // ExpireTasks marks all open tasks past their deadline as cancelled.
+//
+// The work is chunked into bounded UPDATEs (LIMIT expireTasksBatchSize)
+// rather than a single unbounded UPDATE, for two reasons:
+//
+//  1. Bounded transactions: SQLite serializes writers, so a long UPDATE
+//     blocks every other writer until commit. Chunking caps the lock
+//     window per round-trip.
+//  2. Context responsiveness: the expiry worker uses a 30s context. A
+//     single UPDATE doesn't observe ctx between rows, so a slow query
+//     would always run to completion and then return ctx error. Looping
+//     lets us bail between batches.
+//
+// Performance also depends on migration 031, which adds a partial
+// composite index `idx_tasks_expiry(status, deadline) WHERE status='open'
+// AND deadline IS NOT NULL`. The query below is shaped to match it.
 func (s *SQLiteTaskStore) ExpireTasks(ctx context.Context) (int, error) {
 	// Use a string-formatted timestamp for consistent SQLite comparison
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
-		 WHERE status = ? AND deadline IS NOT NULL AND deadline < ?`,
-		TaskStatusCancelled, TaskStatusOpen, now,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("expire tasks: %w", err)
-	}
+	now := time.Now().UTC().Format(sqliteTimeFormat)
 
-	rowsAffected, _ := result.RowsAffected()
-	return int(rowsAffected), nil
+	total := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, fmt.Errorf("expire tasks: %w", err)
+		}
+
+		// SQLite's UPDATE ... LIMIT is only enabled with the
+		// SQLITE_ENABLE_UPDATE_DELETE_LIMIT compile flag (not on by
+		// default in modernc.org/sqlite). Use a subquery on ROWID
+		// to portably bound the batch.
+		result, err := s.db.ExecContext(ctx,
+			`UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
+			 WHERE rowid IN (
+			     SELECT rowid FROM tasks
+			     WHERE status = ? AND deadline IS NOT NULL AND deadline < ?
+			     LIMIT ?
+			 )`,
+			TaskStatusCancelled, TaskStatusOpen, now, expireTasksBatchSize,
+		)
+		if err != nil {
+			return total, fmt.Errorf("expire tasks: %w", err)
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		total += int(rowsAffected)
+		if rowsAffected < int64(expireTasksBatchSize) {
+			// Last (possibly empty) batch — nothing more to expire.
+			return total, nil
+		}
+	}
 }
 
 // CancelTasksByChannel cancels all open tasks for a channel (used before channel deletion).

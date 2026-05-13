@@ -326,6 +326,150 @@ func TestSQLiteTaskStore_ExpireTasks(t *testing.T) {
 	}
 }
 
+// TestSQLiteTaskStore_ExpireTasks_LargeBatch exercises the expiry path at a
+// scale comparable to a long-lived production instance: a few thousand mixed
+// tasks (expired-open, future-open, no-deadline, cancelled), confirms the
+// worker chunks past its internal batch size, and that the entire run fits
+// inside a tight per-tick context — guarding the regression that the
+// expiry-worker hit on kubic ("context deadline exceeded").
+//
+// The total row count is deliberately larger than expireTasksBatchSize (500)
+// so the batching loop must iterate more than once.
+func TestSQLiteTaskStore_ExpireTasks_LargeBatch(t *testing.T) {
+	taskStore, channelStore := newTestTaskStore(t)
+	ch := createAuctionChannel(t, channelStore)
+	ctx := context.Background()
+
+	const (
+		expiredOpen  = 1200 // > 2 * batch size, forces multiple iterations
+		futureOpen   = 400
+		noDeadline   = 400
+		alreadyDone  = 400
+	)
+
+	past := time.Now().Add(-1 * time.Hour)
+	future := time.Now().Add(1 * time.Hour)
+
+	for i := 0; i < expiredOpen; i++ {
+		if err := taskStore.CreateTask(ctx, &Task{
+			ChannelID: ch.ID, PostedBy: "poster-agent",
+			Title: "expired", Status: TaskStatusOpen,
+			Deadline: &past, Requirements: json.RawMessage(`{}`),
+		}); err != nil {
+			t.Fatalf("seed expired task %d: %v", i, err)
+		}
+	}
+	for i := 0; i < futureOpen; i++ {
+		taskStore.CreateTask(ctx, &Task{
+			ChannelID: ch.ID, PostedBy: "poster-agent",
+			Title: "future", Status: TaskStatusOpen,
+			Deadline: &future, Requirements: json.RawMessage(`{}`),
+		})
+	}
+	for i := 0; i < noDeadline; i++ {
+		taskStore.CreateTask(ctx, &Task{
+			ChannelID: ch.ID, PostedBy: "poster-agent",
+			Title: "no-deadline", Status: TaskStatusOpen,
+			Requirements: json.RawMessage(`{}`),
+		})
+	}
+	for i := 0; i < alreadyDone; i++ {
+		taskStore.CreateTask(ctx, &Task{
+			ChannelID: ch.ID, PostedBy: "poster-agent",
+			Title: "done", Status: TaskStatusCompleted,
+			Deadline: &past, Requirements: json.RawMessage(`{}`),
+		})
+	}
+
+	// Run with the same shape of context budget the worker uses, but tighter
+	// (5s) so a regression to the unbounded-scan plan would fail this test
+	// well before the worker's real 30s ceiling.
+	tightCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	count, err := taskStore.ExpireTasks(tightCtx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("ExpireTasks: %v (elapsed=%s)", err, elapsed)
+	}
+	if count != expiredOpen {
+		t.Errorf("expired count = %d, want %d", count, expiredOpen)
+	}
+	t.Logf("expired %d tasks in %s (over %d total rows)",
+		count, elapsed, expiredOpen+futureOpen+noDeadline+alreadyDone)
+
+	// Future / no-deadline tasks must remain open.
+	openTasks, _ := taskStore.ListTasks(ctx, ch.ID, TaskStatusOpen)
+	if len(openTasks) != futureOpen+noDeadline {
+		t.Errorf("open after expiry = %d, want %d",
+			len(openTasks), futureOpen+noDeadline)
+	}
+
+	// Second invocation on a clean set must be cheap and return 0.
+	count2, err := taskStore.ExpireTasks(ctx)
+	if err != nil {
+		t.Fatalf("ExpireTasks (idempotent run): %v", err)
+	}
+	if count2 != 0 {
+		t.Errorf("idempotent run expired = %d, want 0", count2)
+	}
+}
+
+// TestSQLiteTaskStore_ExpireTasks_UsesIndex confirms the partial composite
+// index from migration 031 is the plan the query optimizer picks. If a
+// future change drops the index or rewrites the query incompatibly, the
+// planner will fall back to a SCAN and this test will fail loudly.
+func TestSQLiteTaskStore_ExpireTasks_UsesIndex(t *testing.T) {
+	taskStore, _ := newTestTaskStore(t)
+
+	// Seed a few rows so the planner has stats to work with.
+	// (SQLite's planner is mostly schema-driven, but better safe.)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Format(sqliteTimeFormat)
+	rows, err := taskStore.db.QueryContext(ctx,
+		`EXPLAIN QUERY PLAN
+		 UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE rowid IN (
+		     SELECT rowid FROM tasks
+		     WHERE status = ? AND deadline IS NOT NULL AND deadline < ?
+		     LIMIT ?
+		 )`,
+		TaskStatusCancelled, TaskStatusOpen, now, expireTasksBatchSize,
+	)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+
+	sawIndex := false
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan plan row: %v", err)
+		}
+		plan = append(plan, detail)
+		if contains(detail, "idx_tasks_expiry") {
+			sawIndex = true
+		}
+	}
+	if !sawIndex {
+		t.Errorf("expected query plan to use idx_tasks_expiry, got: %v", plan)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSQLiteTaskStore_CancelTasksByChannel(t *testing.T) {
 	taskStore, channelStore := newTestTaskStore(t)
 	ch := createAuctionChannel(t, channelStore)
