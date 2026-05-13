@@ -573,6 +573,7 @@ func TestBridge_TopLevelToolHint(t *testing.T) {
 	bridge, _, _, _ := newTestBridge(t)
 	ctx := context.Background()
 
+	// The misspelled wrong guess hits the hint.
 	_, err := bridge.Call(ctx, "rewrite_core_memory", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for top-level-tool wrong-guess")
@@ -583,6 +584,19 @@ func TestBridge_TopLevelToolHint(t *testing.T) {
 	}
 	if !strings.Contains(msg, "memory_rewrite_core") {
 		t.Errorf("error should name the real tool memory_rewrite_core, got: %v", err)
+	}
+
+	// The correct top-level tool name, when called via the bridge, also
+	// returns the hint instead of plain "unknown action". (Agents learn the
+	// real tool name from the first hint and then retry via call() — the
+	// hint must catch both spellings.)
+	_, err = bridge.Call(ctx, "memory_rewrite_core", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for memory_rewrite_core via bridge")
+	}
+	msg = err.Error()
+	if !strings.Contains(msg, "top-level MCP tool") {
+		t.Errorf("memory_rewrite_core via bridge should hint top-level MCP tool, got: %v", err)
 	}
 }
 

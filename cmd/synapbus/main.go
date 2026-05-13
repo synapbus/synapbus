@@ -305,7 +305,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create swarm service (task auction + stigmergy)
-	taskStore := channels.NewSQLiteTaskStore(db.DB)
+	taskStore := channels.NewSQLiteTaskStore(db.DB).WithReadDB(db.ReadDB)
 	swarmService := channels.NewSwarmService(taskStore, channelStore, tracer)
 
 	// Create attachment service

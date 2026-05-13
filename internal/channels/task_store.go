@@ -27,6 +27,7 @@ type TaskStore interface {
 // SQLiteTaskStore implements TaskStore using SQLite.
 type SQLiteTaskStore struct {
 	db     *sql.DB
+	readDB *sql.DB
 	logger *slog.Logger
 }
 
@@ -36,6 +37,23 @@ func NewSQLiteTaskStore(db *sql.DB) *SQLiteTaskStore {
 		db:     db,
 		logger: slog.Default().With("component", "task-store"),
 	}
+}
+
+// WithReadDB attaches a read-only connection pool used for cheap pre-checks
+// (e.g. ExpireTasks asks "any rows to expire?" before contending for the
+// serialized write connection). Returns the receiver for chaining. If never
+// called, all queries run against the write pool.
+func (s *SQLiteTaskStore) WithReadDB(readDB *sql.DB) *SQLiteTaskStore {
+	s.readDB = readDB
+	return s
+}
+
+// queryDB returns the read pool if attached, otherwise the write pool.
+func (s *SQLiteTaskStore) queryDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
 }
 
 // sqliteTimeFormat is the format used for storing timestamps consistently in SQLite.
@@ -290,6 +308,25 @@ const expireTasksBatchSize = 500
 func (s *SQLiteTaskStore) ExpireTasks(ctx context.Context) (int, error) {
 	// Use a string-formatted timestamp for consistent SQLite comparison
 	now := time.Now().UTC().Format(sqliteTimeFormat)
+
+	// Fast pre-check on the read pool: if nothing is expirable right now,
+	// don't queue behind the serialized write connection at all. The write
+	// pool has MaxOpenConns=1 in production, so an idle ExpireTasks call
+	// that takes the slot while a long writer holds it would block until
+	// the context deadline — even though the work itself is empty. The
+	// EXISTS query is index-resident (idx_tasks_expiry) and runs on a
+	// concurrent read connection.
+	var hasWork int
+	if err := s.queryDB().QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM tasks
+		               WHERE status = ? AND deadline IS NOT NULL AND deadline < ?)`,
+		TaskStatusOpen, now,
+	).Scan(&hasWork); err != nil {
+		return 0, fmt.Errorf("expire tasks pre-check: %w", err)
+	}
+	if hasWork == 0 {
+		return 0, nil
+	}
 
 	total := 0
 	for {

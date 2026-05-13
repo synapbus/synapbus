@@ -2,7 +2,9 @@ package channels
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -458,6 +460,65 @@ func TestSQLiteTaskStore_ExpireTasks_UsesIndex(t *testing.T) {
 	}
 	if !sawIndex {
 		t.Errorf("expected query plan to use idx_tasks_expiry, got: %v", plan)
+	}
+}
+
+// TestSQLiteTaskStore_ExpireTasks_EmptyShortCircuits verifies that when the
+// pre-check finds no expirable rows, ExpireTasks returns (0, nil) without
+// running the UPDATE loop. In production this is the steady-state case
+// (tasks is empty most of the time) and the pre-check is what keeps the
+// worker off the serialized write connection.
+func TestSQLiteTaskStore_ExpireTasks_EmptyShortCircuits(t *testing.T) {
+	taskStore, _ := newTestTaskStore(t)
+	ctx := context.Background()
+
+	count, err := taskStore.ExpireTasks(ctx)
+	if err != nil {
+		t.Fatalf("ExpireTasks on empty table: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+// TestSQLiteTaskStore_ExpireTasks_UsesReadPoolForPreCheck verifies that when
+// a read pool is attached via WithReadDB, the EXISTS pre-check runs on it
+// (and the actual UPDATE still runs on the write pool when work is present).
+func TestSQLiteTaskStore_ExpireTasks_UsesReadPoolForPreCheck(t *testing.T) {
+	taskStore, channelStore := newTestTaskStore(t)
+
+	// Open a separate handle to the same shared-cache memory DB.
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	readDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open read pool: %v", err)
+	}
+	t.Cleanup(func() { readDB.Close() })
+
+	taskStore.WithReadDB(readDB)
+
+	ctx := context.Background()
+
+	// Empty: short-circuit on the read pool.
+	if n, err := taskStore.ExpireTasks(ctx); err != nil || n != 0 {
+		t.Fatalf("empty ExpireTasks with read pool: count=%d err=%v", n, err)
+	}
+
+	// Seed one expirable task and verify the UPDATE still runs.
+	ch := createAuctionChannel(t, channelStore)
+	past := time.Now().Add(-1 * time.Hour)
+	if err := taskStore.CreateTask(ctx, &Task{
+		ChannelID: ch.ID, PostedBy: "poster-agent", Title: "Expired",
+		Status: TaskStatusOpen, Deadline: &past, Requirements: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	n, err := taskStore.ExpireTasks(ctx)
+	if err != nil {
+		t.Fatalf("ExpireTasks with read pool: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expired count = %d, want 1", n)
 	}
 }
 

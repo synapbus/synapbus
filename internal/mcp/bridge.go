@@ -89,9 +89,11 @@ var bridgeActionAliases = map[string]string{
 // bridgeTopLevelOnly lists action names that exist as top-level MCP tools
 // (registered on the MCP server), not as call() bridge actions. Agents that
 // invoke these via call() / execute() get a targeted error pointing them at
-// the real tool rather than a generic "unknown action".
+// the real tool rather than a generic "unknown action". Keyed by what the
+// agent typed; value is the canonical top-level tool name.
 var bridgeTopLevelOnly = map[string]string{
 	"rewrite_core_memory": "memory_rewrite_core",
+	"memory_rewrite_core": "memory_rewrite_core",
 }
 
 // Call dispatches an action by name to the appropriate service method.
