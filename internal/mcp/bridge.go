@@ -250,8 +250,12 @@ var knownBridgeActions = []string{
 
 // suggestBridgeAction returns the closest known action name to `name`, or ""
 // if nothing is plausibly close. Strategy: cheap prefix/substring check first,
-// then Levenshtein within distance 3. Distance threshold scales with the
-// length of the input so very short strings don't false-match.
+// then Levenshtein within distance 3 — but Levenshtein matches must share the
+// leading verb (the token before the first underscore) with the candidate.
+// Without that constraint, e.g. `read_message` is two edits from `send_message`
+// and gets suggested, which is the opposite intent and actively misleading.
+// Distance threshold scales with the length of the input so very short strings
+// don't false-match.
 func suggestBridgeAction(name string) string {
 	if name == "" {
 		return ""
@@ -265,14 +269,19 @@ func suggestBridgeAction(name string) string {
 		}
 	}
 
-	// 2. Levenshtein on full names.
+	// 2. Levenshtein on full names, gated on a matching leading verb so
+	//    `read_message` is not "fixed" by suggesting `send_message`.
 	threshold := 3
 	if len(name) <= 6 {
 		threshold = 2
 	}
+	inputVerb := leadingVerb(lower)
 	bestDist := threshold + 1
 	best := ""
 	for _, candidate := range knownBridgeActions {
+		if leadingVerb(candidate) != inputVerb {
+			continue
+		}
 		d := levenshtein(lower, candidate)
 		if d < bestDist {
 			bestDist = d
@@ -283,6 +292,17 @@ func suggestBridgeAction(name string) string {
 		return best
 	}
 	return ""
+}
+
+// leadingVerb returns the substring before the first underscore, or the
+// whole string if there is no underscore. Used to gate Levenshtein
+// suggestions so a shared suffix (like `_message`) doesn't pair `read_…`
+// with `send_…`.
+func leadingVerb(s string) string {
+	if i := strings.IndexByte(s, '_'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // levenshtein computes the Levenshtein edit distance between a and b using

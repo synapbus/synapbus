@@ -612,10 +612,10 @@ func TestBridge_UnknownAction_Suggestion(t *testing.T) {
 	}{
 		// substring hit: "send" is contained in "send_message"
 		{input: "send", wantContains: "send_message"},
-		// Levenshtein: typo "sned_message" → "send_message" (distance 2)
-		{input: "sned_message", wantContains: "send_message"},
-		// Levenshtein: "list_channel" → "list_channels" (distance 1)
+		// Levenshtein within a shared verb: "list_channel" → "list_channels" (distance 1)
 		{input: "list_channel", wantContains: "list_channels"},
+		// Levenshtein within a shared verb: "get_channel_message" → "get_channel_messages"
+		{input: "get_channel_message", wantContains: "get_channel_messages"},
 	}
 
 	for _, tt := range tests {
@@ -647,6 +647,33 @@ func TestBridge_UnknownAction_NoSuggestion(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "did you mean") {
 		t.Errorf("distant action should not get a suggestion, got: %v", err)
+	}
+}
+
+// TestBridge_UnknownAction_NoCrossVerbSuggestion guards against the suggester
+// pairing actions that share a suffix but have opposite intent — e.g.
+// `read_message` is two edits from `send_message`, but suggesting "send" to an
+// agent that asked to read is actively misleading. The leading-verb gate in
+// suggestBridgeAction must prevent this.
+func TestBridge_UnknownAction_NoCrossVerbSuggestion(t *testing.T) {
+	bridge, _, _, _ := newTestBridge(t)
+	ctx := context.Background()
+
+	cases := []string{
+		"read_message",        // would have suggested send_message (distance 2)
+		"delete_message",      // would have suggested send_message (distance 3)
+		"fetch_channel",       // unrelated verb; must not suggest send/list/get
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			_, err := bridge.Call(ctx, in, map[string]any{})
+			if err == nil {
+				t.Fatalf("expected error for %q", in)
+			}
+			if strings.Contains(err.Error(), "did you mean") {
+				t.Errorf("cross-verb suggestion leaked for %q: %v", in, err)
+			}
+		})
 	}
 }
 
