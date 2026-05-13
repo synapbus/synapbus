@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -486,3 +487,172 @@ func TestBridge_React_Toggle_Removes_WorkflowState(t *testing.T) {
 }
 
 var _ = storage.RunMigrations
+
+// TestBridge_ActionAliases verifies that each observed wrong action name from
+// production logs resolves to the correct real action. We don't validate the
+// full result payload — only that the call succeeds (i.e. dispatch reached the
+// real handler) rather than returning "unknown action".
+func TestBridge_ActionAliases(t *testing.T) {
+	tests := []struct {
+		alias     string
+		realName  string
+		args      map[string]any
+		setupCh   string // optional: channel name to create+join before the call
+		expectErr string // optional: substring of expected error (when call reaches real handler but fails for unrelated reasons)
+	}{
+		{
+			alias:    "search",
+			realName: "search_messages",
+			args:     map[string]any{"query": "anything"},
+		},
+		{
+			alias:    "my_status",
+			realName: "read_inbox",
+			args:     map[string]any{"limit": 5},
+		},
+		{
+			alias:    "read_dm",
+			realName: "read_inbox",
+			args:     map[string]any{"limit": 5},
+		},
+		{
+			alias:    "read_channel",
+			realName: "get_channel_messages",
+			args:     map[string]any{"channel_name": "alias-ch"},
+			setupCh:  "alias-ch",
+		},
+		{
+			alias:     "read_article",
+			realName:  "get_article",
+			args:      map[string]any{"slug": "anything"},
+			expectErr: "wiki not available", // bridge has no wikiService → dispatch reached real handler
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.alias, func(t *testing.T) {
+			bridge, _, _, channelService := newTestBridge(t)
+			ctx := context.Background()
+
+			if tt.setupCh != "" {
+				ch, err := channelService.CreateChannel(ctx, channels.CreateChannelRequest{
+					Name: tt.setupCh, Type: "standard", CreatedBy: "agent-a",
+				})
+				if err != nil {
+					t.Fatalf("create channel: %v", err)
+				}
+				if err := channelService.JoinChannel(ctx, ch.ID, "agent-a"); err != nil {
+					t.Fatalf("join channel: %v", err)
+				}
+			}
+
+			_, err := bridge.Call(ctx, tt.alias, tt.args)
+			if tt.expectErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.expectErr)
+				}
+				if !strings.Contains(err.Error(), tt.expectErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.expectErr)
+				}
+				if strings.Contains(err.Error(), "unknown action") {
+					t.Fatalf("alias %q should have been resolved, got unknown-action error: %v", tt.alias, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("alias %q (real=%s) failed: %v", tt.alias, tt.realName, err)
+			}
+		})
+	}
+}
+
+// TestBridge_TopLevelToolHint verifies that wrong-guess names which map to
+// top-level MCP tools (not bridge actions) produce a targeted hint pointing
+// at the real tool, instead of a generic "unknown action" error.
+func TestBridge_TopLevelToolHint(t *testing.T) {
+	bridge, _, _, _ := newTestBridge(t)
+	ctx := context.Background()
+
+	_, err := bridge.Call(ctx, "rewrite_core_memory", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for top-level-tool wrong-guess")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "top-level MCP tool") {
+		t.Errorf("error should mention top-level MCP tool, got: %v", err)
+	}
+	if !strings.Contains(msg, "memory_rewrite_core") {
+		t.Errorf("error should name the real tool memory_rewrite_core, got: %v", err)
+	}
+}
+
+// TestBridge_UnknownAction_Suggestion verifies that an unknown action that is
+// close to a real one (Levenshtein-wise) returns a "did you mean" suggestion.
+func TestBridge_UnknownAction_Suggestion(t *testing.T) {
+	bridge, _, _, _ := newTestBridge(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		input        string
+		wantContains string
+	}{
+		// substring hit: "send" is contained in "send_message"
+		{input: "send", wantContains: "send_message"},
+		// Levenshtein: typo "sned_message" → "send_message" (distance 2)
+		{input: "sned_message", wantContains: "send_message"},
+		// Levenshtein: "list_channel" → "list_channels" (distance 1)
+		{input: "list_channel", wantContains: "list_channels"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := bridge.Call(ctx, tt.input, map[string]any{})
+			if err == nil {
+				t.Fatalf("expected error for %q", tt.input)
+			}
+			if !strings.Contains(err.Error(), "did you mean") {
+				t.Errorf("error should contain 'did you mean', got: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantContains) {
+				t.Errorf("error should suggest %q, got: %v", tt.wantContains, err)
+			}
+		})
+	}
+}
+
+// TestBridge_UnknownAction_NoSuggestion verifies that a truly distant unknown
+// action returns the plain "unknown action" error without a misleading
+// suggestion.
+func TestBridge_UnknownAction_NoSuggestion(t *testing.T) {
+	bridge, _, _, _ := newTestBridge(t)
+	ctx := context.Background()
+
+	_, err := bridge.Call(ctx, "xyzzy_quux_frobnicate", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("distant action should not get a suggestion, got: %v", err)
+	}
+}
+
+func TestLevenshtein(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"", "", 0},
+		{"abc", "abc", 0},
+		{"", "abc", 3},
+		{"abc", "", 3},
+		{"kitten", "sitting", 3},
+		{"send", "sned", 2},
+		{"list_channel", "list_channels", 1},
+	}
+	for _, tt := range tests {
+		got := levenshtein(tt.a, tt.b)
+		if got != tt.want {
+			t.Errorf("levenshtein(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}

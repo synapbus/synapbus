@@ -67,8 +67,43 @@ func NewServiceBridge(
 	}
 }
 
+// bridgeActionAliases maps observed wrong action names that agents have called
+// to the real bridge action they probably meant. This is a small, hand-curated
+// whitelist of guesses seen in production logs — not a fuzzy-match layer.
+// Keep entries minimal and only add names that have a single unambiguous target.
+var bridgeActionAliases = map[string]string{
+	// read_channel → fetch messages from a channel (requires channel_id/name)
+	"read_channel": "get_channel_messages",
+	// search → unified search over messages
+	"search": "search_messages",
+	// read_dm → DMs land in the inbox
+	"read_dm": "read_inbox",
+	// my_status → no exact bridge equivalent; agents probing for "what's new"
+	// most often want read_inbox. (The top-level MCP `my_status` tool is the
+	// canonical way; this alias keeps call() from failing.)
+	"my_status": "read_inbox",
+	// read_article → wiki retrieval
+	"read_article": "get_article",
+}
+
+// bridgeTopLevelOnly lists action names that exist as top-level MCP tools
+// (registered on the MCP server), not as call() bridge actions. Agents that
+// invoke these via call() / execute() get a targeted error pointing them at
+// the real tool rather than a generic "unknown action".
+var bridgeTopLevelOnly = map[string]string{
+	"rewrite_core_memory": "memory_rewrite_core",
+}
+
 // Call dispatches an action by name to the appropriate service method.
 func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[string]any) (any, error) {
+	// Apply aliases for common wrong-name guesses observed in agent logs.
+	if real, ok := bridgeActionAliases[actionName]; ok {
+		actionName = real
+	}
+	// Catch wrong guesses that map to top-level MCP tools (not bridge actions).
+	if real, ok := bridgeTopLevelOnly[actionName]; ok {
+		return nil, fmt.Errorf("'%s' is a top-level MCP tool, not a call() action; invoke it as a tool directly (real name: %s)", actionName, real)
+	}
 	switch actionName {
 	// --- Messaging ---
 	case "read_inbox":
@@ -173,8 +208,124 @@ func (b *ServiceBridge) Call(ctx context.Context, actionName string, args map[st
 		return b.callQueryReputation(ctx, args)
 
 	default:
+		if suggestion := suggestBridgeAction(actionName); suggestion != "" {
+			return nil, fmt.Errorf("unknown action: %s (did you mean: %s)", actionName, suggestion)
+		}
 		return nil, fmt.Errorf("unknown action: %s", actionName)
 	}
+}
+
+// knownBridgeActions enumerates every action name routable through Call().
+// Kept in sync with the switch in Call() by hand — there are not many. Used
+// only to power "did you mean" suggestions when an unknown action arrives.
+var knownBridgeActions = []string{
+	// Messaging
+	"read_inbox", "claim_messages", "mark_done", "search_messages",
+	"discover_agents", "send_message",
+	// Channels
+	"create_channel", "join_channel", "leave_channel", "list_channels",
+	"invite_to_channel", "kick_from_channel", "get_channel_messages",
+	"send_channel_message", "update_channel",
+	// Swarm
+	"post_task", "bid_task", "accept_bid", "complete_task", "list_tasks",
+	// Attachments
+	"upload_attachment", "download_attachment",
+	// Reactions
+	"react", "unreact", "get_reactions", "list_by_state",
+	// Threads
+	"get_replies",
+	// Trust
+	"get_trust",
+	// SQL Query
+	"query",
+	// Wiki
+	"create_article", "get_article", "update_article", "list_articles",
+	"get_backlinks",
+	// Marketplace
+	"post_auction", "bid", "award", "mark_task_done", "read_skill_card",
+	"query_reputation",
+}
+
+// suggestBridgeAction returns the closest known action name to `name`, or ""
+// if nothing is plausibly close. Strategy: cheap prefix/substring check first,
+// then Levenshtein within distance 3. Distance threshold scales with the
+// length of the input so very short strings don't false-match.
+func suggestBridgeAction(name string) string {
+	if name == "" {
+		return ""
+	}
+	lower := strings.ToLower(name)
+
+	// 1. Substring match — common when agents drop or add a prefix/suffix.
+	for _, candidate := range knownBridgeActions {
+		if strings.Contains(candidate, lower) || strings.Contains(lower, candidate) {
+			return candidate
+		}
+	}
+
+	// 2. Levenshtein on full names.
+	threshold := 3
+	if len(name) <= 6 {
+		threshold = 2
+	}
+	bestDist := threshold + 1
+	best := ""
+	for _, candidate := range knownBridgeActions {
+		d := levenshtein(lower, candidate)
+		if d < bestDist {
+			bestDist = d
+			best = candidate
+		}
+	}
+	if bestDist <= threshold {
+		return best
+	}
+	return ""
+}
+
+// levenshtein computes the Levenshtein edit distance between a and b using
+// a single rolling row of O(min(len)) space. Pure Go, no deps.
+func levenshtein(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	// Ensure a is the shorter — minimises row width.
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	prev := make([]int, len(a)+1)
+	curr := make([]int, len(a)+1)
+	for i := 0; i <= len(a); i++ {
+		prev[i] = i
+	}
+	for j := 1; j <= len(b); j++ {
+		curr[0] = j
+		for i := 1; i <= len(a); i++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			del := prev[i] + 1
+			ins := curr[i-1] + 1
+			sub := prev[i-1] + cost
+			m := del
+			if ins < m {
+				m = ins
+			}
+			if sub < m {
+				m = sub
+			}
+			curr[i] = m
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(a)]
 }
 
 // --- Messaging implementations ---
