@@ -734,8 +734,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		slog.Info("consolidator (dream) worker disabled (SYNAPBUS_DREAM_ENABLED=0)")
 	}
 
-	// Create health checker
-	healthChecker := health.NewChecker(db.DB, version)
+	// Create health checker. Use the read pool (8 concurrent conns) so /readyz
+	// can't be starved by a long-running writer holding the serialized write
+	// connection — most notably the consolidator's dream-job dispatch, which
+	// does a K8s Job create + DB writes that can run 30s+. With the write pool
+	// (MaxOpenConns=1) the probe blocked for the entire dispatch, the kubelet
+	// flipped the pod to not-ready, and the watchdog scaled the deploy to 0.
+	healthChecker := health.NewChecker(db.QueryDB(), version)
 
 	// Set up chi router
 	r := chi.NewRouter()
